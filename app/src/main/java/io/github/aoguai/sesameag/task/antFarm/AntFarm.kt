@@ -776,6 +776,24 @@ class AntFarm : ModelTask() {
         return AnimalFeedStatus.SLEEPY.name == ownerAnimal.animalFeedStatus
     }
 
+    internal fun ensureOwnerAnimalAtHome(actionName: String): Boolean {
+        if (AnimalInteractStatus.HOME.name == ownerAnimal.animalInteractStatus) {
+            return true
+        }
+
+        Log.farm(TAG, "$actionName 前检测到小鸡不在庄园，尝试召回")
+        recallAnimal()
+        if (!ownerFarmId.isNullOrBlank()) {
+            syncAnimalStatus(ownerFarmId)
+        }
+        if (AnimalInteractStatus.HOME.name == ownerAnimal.animalInteractStatus) {
+            return true
+        }
+
+        Log.farm(TAG, "$actionName 跳过：小鸡仍不在庄园[互动状态=${ownerAnimal.animalInteractStatus ?: "未知"}]")
+        return false
+    }
+
     internal fun shouldHarvestProduceNow(): Boolean {
         return harvestProduce?.value == true && benevolenceScore >= 1
     }
@@ -1171,8 +1189,8 @@ class AntFarm : ModelTask() {
 //            }
 //        }
 
-        if (AnimalInteractStatus.HOME.name != ownerAnimal.animalInteractStatus) {
-            return  // 小鸡不在家，不执行喂养逻辑
+        if (!ensureOwnerAnimalAtHome("喂食")) {
+            return
         }
 
         if (AnimalFeedStatus.SLEEPY.name == ownerAnimal.animalFeedStatus) {
@@ -2116,6 +2134,7 @@ class AntFarm : ModelTask() {
                     val title = task.optString("title")
                     val bizKey = task.getString("bizKey")
 
+                    if (Status.hasFlagToday(StatusFlags.FLAG_FARM_TASK_LIMIT_PREFIX + bizKey)) continue
                     if (TaskBlacklist.isTaskInBlacklist(farmTaskBlacklistModule, title) ||
                         TaskBlacklist.isTaskInBlacklist(farmTaskBlacklistModule, bizKey)) continue
 
@@ -2283,23 +2302,37 @@ class AntFarm : ModelTask() {
         }
     }
 
+    private fun isFarmTaskQuotaReachedResponse(jo: JSONObject): Boolean {
+        val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
+        if (resultCode == "309") return true
+
+        val message = jo.optString("memo")
+            .ifBlank { jo.optString("resultDesc") }
+            .ifBlank { jo.optString("desc") }
+        return message.contains("任务数达到当日上限") ||
+            message.contains("权益获取次数超过上限") ||
+            message.contains("当日达到上限") ||
+            message.contains("当日上限")
+    }
+
     // 抽取通用任务处理逻辑
     private fun handleGeneralTask(bizKey: String, title: String, silent: Boolean = false) {
         val result = AntFarmRpcCall.doFarmTask(bizKey)
         if (result.isNullOrEmpty()) return
 
         val jo = JSONObject(result)
+        if (isFarmTaskQuotaReachedResponse(jo)) {
+            Status.setFlagToday(StatusFlags.FLAG_FARM_TASK_LIMIT_PREFIX + bizKey)
+            Log.farm(TAG, "庄园任务[$title]已达上限")
+            return
+        }
+
         if (ResChecker.checkRes(TAG, jo)) {
             if (!silent) Log.farm("庄园任务完成🧾[$title]")
         } else {
-            val resultCode = jo.optString("resultCode", "")
-            if (resultCode == "309") {
-                Status.setFlagToday(StatusFlags.FLAG_FARM_TASK_LIMIT_PREFIX + bizKey)
-                Log.farm(TAG, "庄园任务[$title]已达上限")
-            } else {
-                Log.error("庄园任务失败：$title code:$resultCode")
-                TaskBlacklist.autoAddToBlacklist(farmTaskBlacklistModule, bizKey, title, resultCode)
-            }
+            val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
+            Log.error("庄园任务失败：$title code:$resultCode")
+            TaskBlacklist.autoAddToBlacklist(farmTaskBlacklistModule, bizKey, title, resultCode)
         }
     }
 
@@ -2521,6 +2554,10 @@ class AntFarm : ModelTask() {
      */
     private fun feedAnimal(farmId: String?): Boolean {
         try {
+            if (!ensureOwnerAnimalAtHome("投喂小鸡")) {
+                return false
+            }
+
             // 检查小鸡是否在睡觉，如果在睡觉则直接返回
             if (AnimalFeedStatus.SLEEPY.name == ownerAnimal.animalFeedStatus) {
                 Log.farm(TAG, "投喂小鸡🥣[小鸡正在睡觉中，跳过投喂]")

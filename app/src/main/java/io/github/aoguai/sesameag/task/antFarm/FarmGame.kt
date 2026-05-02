@@ -6,6 +6,7 @@ import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.util.GameTask
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
+import io.github.aoguai.sesameag.util.RpcCache
 import io.github.aoguai.sesameag.util.TimeTriggerEvaluator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -14,6 +15,14 @@ import org.json.JSONObject
 
 object FarmGame {
     private const val TAG = "FarmGame"
+    private const val QUERY_GAME_LIST_RPC = "com.alipay.charitygamecenter.queryGameList"
+
+    private fun isDrawQuotaExhausted(message: String): Boolean {
+        return message.contains("抽奖次数不足") ||
+            message.contains("无可用抽奖次数") ||
+            message.contains("暂无抽奖次数")
+    }
+
     enum class GameType {
         flyGame, hitGame, starGame, jumpGame;
         fun gameName(): String = when(this) {
@@ -214,6 +223,7 @@ object FarmGame {
                 }
             }
             while (true) {
+                RpcCache.invalidate(QUERY_GAME_LIST_RPC)
                 val response = AntFarmRpcCall.queryGameList()
                 val responseJo = JSONObject(response)
                 val jo = responseJo.optJSONObject("resData") ?: responseJo
@@ -243,17 +253,8 @@ object FarmGame {
                         val drawResponse = JSONObject(AntFarmRpcCall.drawGameCenterAward(batchDrawCount))
                         val drawRes = drawResponse.optJSONObject("resData") ?: drawResponse
                         if (drawRes.optBoolean("success", drawResponse.optBoolean("success"))) {
-                            // 领取成功后，更新剩余可领取的 quotaCanUse
-                            val nextRights = findFirstObjectByKey(drawRes, "gameCenterDrawRights")
-                                ?: findFirstObjectByKey(drawRes, "gameDrawAwardActivity")
-                                ?: findFirstObjectByKey(drawRes, "gameEntryInfo")
-                            quotaCanUse = nextRights?.optInt(
-                                "quotaCanUse",
-                                nextRights.optInt(
-                                    "canUseTimes",
-                                    drawRes.optInt("drawRightsTimes", quotaCanUse - batchDrawCount)
-                                )
-                            ) ?: (quotaCanUse - batchDrawCount)
+                            RpcCache.invalidate(QUERY_GAME_LIST_RPC)
+                            quotaCanUse = (quotaCanUse - batchDrawCount).coerceAtLeast(0)
 
                             val awardList = findFirstArrayByKey(drawRes, "gameCenterDrawAwardList")
                                 ?: findFirstArrayByKey(drawRes, "drawAwardList")
@@ -274,7 +275,11 @@ object FarmGame {
                             val desc = drawRes.optString("desc")
                                 .ifBlank { drawRes.optString("resultDesc") }
                                 .ifBlank { drawResponse.optString("desc") }
-                            Log.farm(TAG, "开启宝箱失败: $desc")
+                            if (isDrawQuotaExhausted(desc)) {
+                                Log.farm(TAG, "开宝箱权益已用完，停止本轮开箱: $desc")
+                            } else {
+                                Log.farm(TAG, "开启宝箱失败: $desc")
+                            }
                             return
                         }
                     }

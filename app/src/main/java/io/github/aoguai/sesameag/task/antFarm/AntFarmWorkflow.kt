@@ -67,6 +67,8 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
     if (kitchen?.value == true) {
         if (isOwnerAnimalSleeping()) {
             Log.farm(FARM_TAG, "小鸡厨房🐔[小鸡正在睡觉中，跳过厨房功能]")
+        } else if (!ensureOwnerAnimalAtHome("小鸡厨房")) {
+            Log.farm(FARM_TAG, "小鸡厨房🐔[小鸡不在庄园，跳过厨房功能]")
         } else {
             collectDailyFoodMaterial()
             collectDailyLimitedFoodMaterial()
