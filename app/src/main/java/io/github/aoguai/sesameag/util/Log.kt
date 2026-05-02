@@ -144,19 +144,8 @@ object Log {
     }
 
     @JvmStatic
-    @JvmOverloads
-    fun forest(tag: String, msg: String, type: Int = 1) {
-        forest(formatTaggedMessage(tag, msg), type)
-    }
-
-    @JvmStatic
     fun orchard(msg: String) {
         business(LogChannel.ORCHARD, msg)
-    }
-
-    @JvmStatic
-    fun orchard(tag: String, msg: String) {
-        orchard(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -166,19 +155,8 @@ object Log {
     }
 
     @JvmStatic
-    @JvmOverloads
-    fun farm(tag: String, msg: String, type: Int = 1) {
-        farm(formatTaggedMessage(tag, msg), type)
-    }
-
-    @JvmStatic
     fun stall(msg: String) {
         business(LogChannel.STALL, msg)
-    }
-
-    @JvmStatic
-    fun stall(tag: String, msg: String) {
-        stall(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -187,18 +165,8 @@ object Log {
     }
 
     @JvmStatic
-    fun ocean(tag: String, msg: String) {
-        ocean(formatTaggedMessage(tag, msg))
-    }
-
-    @JvmStatic
     fun member(msg: String) {
         business(LogChannel.MEMBER, msg)
-    }
-
-    @JvmStatic
-    fun member(tag: String, msg: String) {
-        member(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -207,28 +175,13 @@ object Log {
     }
 
     @JvmStatic
-    fun sports(tag: String, msg: String) {
-        sports(formatTaggedMessage(tag, msg))
-    }
-
-    @JvmStatic
     fun greenFinance(msg: String) {
         business(LogChannel.GREEN_FINANCE, msg)
     }
 
     @JvmStatic
-    fun greenFinance(tag: String, msg: String) {
-        greenFinance(formatTaggedMessage(tag, msg))
-    }
-
-    @JvmStatic
     fun sesame(msg: String) {
         business(LogChannel.SESAME_CREDIT, msg)
-    }
-
-    @JvmStatic
-    fun sesame(tag: String, msg: String) {
-        sesame(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic

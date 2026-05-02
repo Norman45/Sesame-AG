@@ -69,11 +69,11 @@ class GreenFinance : ModelTask() {
     override fun check(): Boolean {
         return when {
             TaskCommon.IS_ENERGY_TIME -> {
-                Log.greenFinance(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
+                Log.greenFinance("⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
                 false
             }
             TaskCommon.IS_MODULE_SLEEP_TIME -> {
-                Log.greenFinance(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
+                Log.greenFinance("💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
                 false
             }
             else -> true
@@ -89,7 +89,7 @@ class GreenFinance : ModelTask() {
     @Suppress("ReturnCount")
     override suspend fun runSuspend() {
         try {
-            Log.greenFinance(TAG, "执行开始-${getName()}")
+            Log.greenFinance("执行开始-${getName()}")
             val s = GreenFinanceRpcCall.greenFinanceIndex()
             var jo = JsonUtil.parseJSONObject(s)
             if (!jo.optBoolean("success")) {
@@ -144,7 +144,7 @@ class GreenFinance : ModelTask() {
             Log.runtime(TAG, "index err:")
             Log.printStackTrace(TAG, th)
         } finally {
-            Log.greenFinance(TAG, "执行结束-${getName()}")
+            Log.greenFinance("执行结束-${getName()}")
         }
     }
 

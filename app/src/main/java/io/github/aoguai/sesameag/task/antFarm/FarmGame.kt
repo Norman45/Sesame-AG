@@ -83,7 +83,7 @@ object FarmGame {
                     isSatisfied -> playAllFarmGames()
 
                     AntFarm.foodStock > ceilingStock -> {
-                        Log.farm(TAG, "当前饲料${AntFarm.foodStock}g（空间不足180g），等待小鸡进食后再执行游戏改分")
+                        Log.farm("当前饲料${AntFarm.foodStock}g（空间不足180g），等待小鸡进食后再执行游戏改分")
                     }
 
                     !isTaskEnabled -> {
@@ -130,7 +130,7 @@ object FarmGame {
 
                 val gameAward = joInit.optJSONObject("gameAward")
                 if (gameAward?.optBoolean("level3Get") == true) {
-                    Log.farm(TAG, "[${gameType.gameName()}]#今日奖励已领满")
+                    Log.farm("[${gameType.gameName()}]#今日奖励已领满")
                     break
                 }
 
@@ -147,7 +147,7 @@ object FarmGame {
                             continue
                         }
                     } else {
-                        Log.farm(TAG, "庄园游戏提交失败: $joRecord")
+                        Log.farm("庄园游戏提交失败: $joRecord")
                     }
                 }
 
@@ -159,7 +159,7 @@ object FarmGame {
             }
         } catch (e: CancellationException) {
             // 协程取消异常必须重新抛出，不能吞掉
-            Log.farm(TAG, "recordFarmGame 协程被取消")
+            Log.farm("recordFarmGame 协程被取消")
             throw e
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "recordFarmGame err:",t)
@@ -219,7 +219,7 @@ object FarmGame {
             runCatching {
                 val warmup = JSONObject(AntFarmRpcCall.refinedOperation("ENTERSELFWITHOUTPOP"))
                 if (!warmup.optBoolean("success", false) && warmup.optString("resultCode") != "100") {
-                    Log.farm(TAG, "庄园游戏中心预热失败，继续尝试查询游戏列表")
+                    Log.farm("庄园游戏中心预热失败，继续尝试查询游戏列表")
                 }
             }
             while (true) {
@@ -229,7 +229,7 @@ object FarmGame {
                 val jo = responseJo.optJSONObject("resData") ?: responseJo
 
                 if (!jo.optBoolean("success", responseJo.optBoolean("success"))) {
-                    Log.farm(TAG, "queryGameList 失败: $responseJo")
+                    Log.farm("queryGameList 失败: $responseJo")
                     break
                 }
 
@@ -237,7 +237,7 @@ object FarmGame {
                     ?: findFirstObjectByKey(jo, "gameDrawAwardActivity")
                     ?: findFirstObjectByKey(jo, "gameEntryInfo")
                 if (currentRights == null) {
-                    Log.farm(TAG, "未找到开宝箱权益，退出")
+                    Log.farm("未找到开宝箱权益，退出")
                     break
                 }
 
@@ -247,7 +247,7 @@ object FarmGame {
                     currentRights.optInt("canUseTimes", currentRights.optInt("drawRightsTimes", 0))
                 )
                 if (quotaCanUse > 0) {
-                    Log.farm(AntFarm.TAG, "当前有 $quotaCanUse 个宝箱待开启...")
+                    Log.farm("当前有 $quotaCanUse 个宝箱待开启...")
                     while (quotaCanUse > 0) {
                         val batchDrawCount = quotaCanUse.coerceAtMost(10)
                         val drawResponse = JSONObject(AntFarmRpcCall.drawGameCenterAward(batchDrawCount))
@@ -276,9 +276,9 @@ object FarmGame {
                                 .ifBlank { drawRes.optString("resultDesc") }
                                 .ifBlank { drawResponse.optString("desc") }
                             if (isDrawQuotaExhausted(desc)) {
-                                Log.farm(TAG, "开宝箱权益已用完，停止本轮开箱: $desc")
+                                Log.farm("开宝箱权益已用完，停止本轮开箱: $desc")
                             } else {
-                                Log.farm(TAG, "开启宝箱失败: $desc")
+                                Log.farm("开启宝箱失败: $desc")
                             }
                             return
                         }
@@ -293,12 +293,12 @@ object FarmGame {
                 // 计算逻辑：如果 已获得 < 总上限，且当前没机会了，就去刷
                 val remainToTask = limit - used
                 if (remainToTask > 0 && quotaCanUse == 0) {
-                    // Log.farm(TAG, "宝箱进度: $used/$limit，开始自动刷任务补齐...")
+                    // Log.farm("宝箱进度: $used/$limit，开始自动刷任务补齐...")
                     // 根据游戏类型选择上报任务
                     GameTask.Farm_ddply.report(remainToTask)
                     continue
                 } else if (remainToTask <= 0) {
-                    Log.farm(TAG, "今日 $limit 个金蛋任务已全部满额")
+                    Log.farm("今日 $limit 个金蛋任务已全部满额")
                     break
                 }
             }

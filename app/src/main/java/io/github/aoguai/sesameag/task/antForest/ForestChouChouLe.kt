@@ -342,7 +342,7 @@ class ForestChouChouLe {
                 true
             } else {
                 val count = taskTryCount.computeIfAbsent(type) { AtomicInteger(0) }.incrementAndGet()
-                Log.forest(TAG, "${s.name} 任务待重试($count): $name")
+                Log.forest("${s.name} 任务待重试($count): $name")
                 false
             }
         } else {

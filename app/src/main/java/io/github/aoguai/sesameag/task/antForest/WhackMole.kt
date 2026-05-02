@@ -61,7 +61,7 @@ object WhackMole {
 
     suspend fun startSuspend(mode: Mode): Boolean = withContext(Dispatchers.IO) {
         if (isRunning) {
-            Log.forest(TAG, "⏭️ 打地鼠游戏正在运行中，跳过重复启动")
+            Log.forest("⏭️ 打地鼠游戏正在运行中，跳过重复启动")
             return@withContext false
         }
         isRunning = true
@@ -82,7 +82,7 @@ object WhackMole {
             return@withContext false
         } finally {
             isRunning = false
-            Log.forest(TAG, "🎮 打地鼠运行状态已重置")
+            Log.forest("🎮 打地鼠运行状态已重置")
         }
     }
 
@@ -97,19 +97,19 @@ object WhackMole {
             val startTs = System.currentTimeMillis()
             val response = JSONObject(AntForestRpcCall.oldstartWhackMole(SOURCE))
             if (!ResChecker.checkRes(TAG, response)) {
-                Log.forest(TAG, response.optString("resultDesc", "开始失败"))
+                Log.forest(response.optString("resultDesc", "开始失败"))
                 return false
             }
             if (!response.optBoolean("canPlayToday", true)) {
                 Status.setFlagToday(StatusFlags.FLAG_ANTFOREST_WHACK_MOLE_EXECUTED)
-                Log.forest(TAG, "🎮 拼手速今日次数已用尽，跳过")
+                Log.forest("🎮 拼手速今日次数已用尽，跳过")
                 return false
             }
 
             val moleInfoArray = response.optJSONArray("moleInfo")
             val token = response.optString("token")
             if (moleInfoArray == null || moleInfoArray.length() == 0 || token.isEmpty()) {
-                Log.forest(TAG, "🎮 拼手速未返回可结算地鼠信息，跳过")
+                Log.forest("🎮 拼手速未返回可结算地鼠信息，跳过")
                 return false
             }
 
@@ -157,7 +157,7 @@ object WhackMole {
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            Log.forest(TAG, "兼容模式出错: ${t.message}")
+            Log.forest("兼容模式出错: ${t.message}")
         }
         return false
     }

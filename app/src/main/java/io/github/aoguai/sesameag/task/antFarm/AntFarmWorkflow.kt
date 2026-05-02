@@ -5,8 +5,6 @@ import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeCounter
 
-private val FARM_TAG: String = AntFarm::class.java.simpleName
-
 internal suspend fun AntFarm.runFarmLifecycleWorkflow(tc: TimeCounter): Boolean {
     if (enterFarm() == null) {
         return false
@@ -66,9 +64,9 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
 
     if (kitchen?.value == true) {
         if (isOwnerAnimalSleeping()) {
-            Log.farm(FARM_TAG, "小鸡厨房🐔[小鸡正在睡觉中，跳过厨房功能]")
+            Log.farm("小鸡厨房🐔[小鸡正在睡觉中，跳过厨房功能]")
         } else if (!ensureOwnerAnimalAtHome("小鸡厨房")) {
-            Log.farm(FARM_TAG, "小鸡厨房🐔[小鸡不在庄园，跳过厨房功能]")
+            Log.farm("小鸡厨房🐔[小鸡不在庄园，跳过厨房功能]")
         } else {
             collectDailyFoodMaterial()
             collectDailyLimitedFoodMaterial()
@@ -84,7 +82,7 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
         tc.countDebug("使用新蛋卡")
     }
     if (shouldHarvestProduceNow()) {
-        Log.farm(FARM_TAG, "有可收取的爱心鸡蛋")
+        Log.farm("有可收取的爱心鸡蛋")
         harvestProduce(ownerFarmId)
         tc.countDebug("收鸡蛋")
     }
@@ -104,20 +102,20 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
         }
         if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.DONATED_CONFIRMED) {
             if (donationCount?.value == AntFarm.DonationCount.ALL) {
-                Log.farm(FARM_TAG, "家庭任务已优先完成首笔捐蛋，继续按配置处理后续公益捐蛋")
+                Log.farm("家庭任务已优先完成首笔捐蛋，继续按配置处理后续公益捐蛋")
             } else {
-                Log.farm(FARM_TAG, "家庭任务优先完成本轮捐蛋，跳过公益捐蛋")
+                Log.farm("家庭任务优先完成本轮捐蛋，跳过公益捐蛋")
             }
         } else if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.DONATED_UNCONFIRMED) {
             if (singleDonationMode) {
-                Log.farm(FARM_TAG, "家庭任务已执行捐蛋但完成状态未确认，本轮按已消耗一次捐蛋处理，跳过公益捐蛋")
+                Log.farm("家庭任务已执行捐蛋但完成状态未确认，本轮按已消耗一次捐蛋处理，跳过公益捐蛋")
             } else {
-                Log.farm(FARM_TAG, "家庭任务已执行捐蛋但完成状态未确认，继续按配置处理剩余公益捐蛋")
+                Log.farm("家庭任务已执行捐蛋但完成状态未确认，继续按配置处理剩余公益捐蛋")
             }
         } else if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.ALREADY_COMPLETED
             && donationCount?.value != AntFarm.DonationCount.ALL
         ) {
-            Log.farm(FARM_TAG, "家庭任务已显示今日捐蛋完成，继续按原有公益捐蛋逻辑处理")
+            Log.farm("家庭任务已显示今日捐蛋完成，继续按原有公益捐蛋逻辑处理")
         }
     }
     if (!skipPublicDonationThisRun && shouldDonateEggNow(userId)) {
@@ -130,7 +128,7 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
         if (publicDonationDone) {
             Log.farm("今日捐蛋完成")
         } else if (!lastDonationNoMoreActivities) {
-            Log.farm(FARM_TAG, "公益捐蛋未完成，保留后续重试")
+            Log.farm("公益捐蛋未完成，保留后续重试")
         }
     }
     if (familyDailyDonateResult.consumedDonation && !userId.isNullOrBlank() && Status.canDonationEgg(userId)) {
@@ -211,7 +209,7 @@ internal suspend fun AntFarm.runFarmFinalizeWorkflow(tc: TimeCounter) {
 
     syncAnimalStatus(ownerFarmId)
     if (isOwnerAnimalSleeping()) {
-        Log.farm(FARM_TAG, "小鸡正在睡觉，领取饲料")
+        Log.farm("小鸡正在睡觉，领取饲料")
         receiveFarmAwards()
     }
 

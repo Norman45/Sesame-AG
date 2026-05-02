@@ -30,7 +30,7 @@ object AntForestRpcCall {
     @JvmStatic
     fun init() {
         val alipayVersion = io.github.aoguai.sesameag.hook.ApplicationHook.alipayVersion
-        Log.forest("AntForestRpcCall", "当前支付宝版本: $alipayVersion")
+        Log.forest("当前支付宝版本: $alipayVersion")
         try {
             when (alipayVersion.versionString) {
                 "10.8.20.8000" -> {
@@ -73,9 +73,7 @@ object AntForestRpcCall {
                     TAKE_LOOK_VERSION = "20260107"
                 }
             }
-            Log.forest(
-                "AntForestRpcCall",
-                "使用API版本: $VERSION, 首页版本: $HOME_PAGE_VERSION, 任务版本: $TASK_LIST_VERSION"
+            Log.forest("使用API版本: $VERSION, 首页版本: $HOME_PAGE_VERSION, 任务版本: $TASK_LIST_VERSION"
             )
         } catch (e: Exception) {
             Log.error("AntForestRpcCall", "版本初始化异常，使用默认版本: $VERSION")
@@ -1113,7 +1111,7 @@ object AntForestRpcCall {
             put("sceneCode", sceneCode)
             put("source", source)
         }
-        Log.forest("AntForestRpcCall", "enterDrawActivityopengreen - 活动: $activityId, 场景: $sceneCode, source: $source")
+        Log.forest("enterDrawActivityopengreen - 活动: $activityId, 场景: $sceneCode, source: $source")
         return RequestManager.requestString("com.alipay.antiepdrawprod.enterDrawActivityopengreen", "[$requestData]")
     }
 
@@ -1125,7 +1123,7 @@ object AntForestRpcCall {
             put("sceneCode", sceneCode)
             put("source", source)
         }
-        Log.forest("AntForestRpcCall", "listTaskopengreen - 场景: $sceneCode, source: $source")
+        Log.forest("listTaskopengreen - 场景: $sceneCode, source: $source")
         return RequestManager.requestString("com.alipay.antieptask.listTaskopengreen", "[$requestData]")
     }
 
@@ -1139,7 +1137,7 @@ object AntForestRpcCall {
             put("source", source)
             put("userId", userId)
         }
-        Log.forest("AntForestRpcCall", "drawopengreen - 活动: $activityId, 场景: $sceneCode, source: $source")
+        Log.forest("drawopengreen - 活动: $activityId, 场景: $sceneCode, source: $source")
         return RequestManager.requestString("com.alipay.antiepdrawprod.drawopengreen", "[$requestData]")
     }
 
@@ -1153,7 +1151,7 @@ object AntForestRpcCall {
             put("source", source)
             put("taskType", taskType)
         }
-        Log.forest("AntForestRpcCall", "receiveTaskAwardopengreen - 任务: $taskType, source: $source")
+        Log.forest("receiveTaskAwardopengreen - 任务: $taskType, source: $source")
         return RequestManager.requestString("com.alipay.antieptask.receiveTaskAwardopengreen", "[$requestData]")
     }
 
@@ -1178,9 +1176,7 @@ object AntForestRpcCall {
             put("sceneCode", sceneCode)
             put("source", source)
         }
-        Log.forest(
-            "AntForestRpcCall",
-            "batchQueryAndTouchOpenGreen - sceneCode: $sceneCode, source: $source, touchIds: ${touchIds.joinToString()}"
+        Log.forest("batchQueryAndTouchOpenGreen - sceneCode: $sceneCode, source: $source, touchIds: ${touchIds.joinToString()}"
         )
         return RequestManager.requestString("com.alipay.antieprights.batchQueryAndTouchopengreen", "[$requestData]")
     }
@@ -1196,7 +1192,7 @@ object AntForestRpcCall {
             put("taskSceneCode", taskSceneCode)
             put("taskType", taskType)
         }
-        Log.forest("AntForestRpcCall", "exchangeTimesFromTaskopengreen - 活动: $activityId, 任务: $taskType, source: $source")
+        Log.forest("exchangeTimesFromTaskopengreen - 活动: $activityId, 任务: $taskType, source: $source")
         return RequestManager.requestString("com.alipay.antiepdrawprod.exchangeTimesFromTaskopengreen", "[$requestData]")
     }
 
@@ -1214,7 +1210,7 @@ object AntForestRpcCall {
             }
             put("taskType", taskType)
         }
-        Log.forest("AntForestRpcCall", "finishTask4Chouchoule - 任务: $taskType")
+        Log.forest("finishTask4Chouchoule - 任务: $taskType")
         return RequestManager.requestString("com.alipay.antiep.finishTask", "[$params]")
     }
 
@@ -1228,7 +1224,7 @@ object AntForestRpcCall {
             put("source", "task_entry")
             put("taskType", taskType)
         }
-        Log.forest("AntForestRpcCall", "finishTaskopengreen - 任务: $taskType")
+        Log.forest("finishTaskopengreen - 任务: $taskType")
         return RequestManager.requestString("com.alipay.antieptask.finishTaskopengreen", "[$params]")
     }
 

@@ -16,16 +16,16 @@ internal suspend fun AntForest.runForestPreparationAndCollectionWorkflow(tc: Tim
 
     val collectEnergyEnabled = isCollectEnergyEnabled()
 
-    Log.forest(FOREST_TAG, "🌳 【正常流程】查询自己的森林主页...")
+    Log.forest("🌳 【正常流程】查询自己的森林主页...")
     var selfHomeObj = querySelfHome()
     tc.countDebug("获取自己主页对象信息")
     if (selfHomeObj != null) {
         if (collectEnergyEnabled) {
             collectEnergy(UserMap.currentUid, selfHomeObj, "self")
-            Log.forest(FOREST_TAG, "✅ 【正常流程】收取自己的能量完成")
+            Log.forest("✅ 【正常流程】收取自己的能量完成")
             tc.countDebug("收取自己的能量")
         } else {
-            Log.forest(FOREST_TAG, "收集能量开关关闭，跳过自己的能量收取")
+            Log.forest("收集能量开关关闭，跳过自己的能量收取")
             tc.countDebug("跳过自己的能量收取（未开启）")
         }
     } else {
@@ -34,44 +34,44 @@ internal suspend fun AntForest.runForestPreparationAndCollectionWorkflow(tc: Tim
     }
 
     if (isTakeLookEnergyEnabled()) {
-        Log.forest(FOREST_TAG, "🚀 执行找能量接口（一键收取）")
+        Log.forest("🚀 执行找能量接口（一键收取）")
         collectEnergyByTakeLook()
         tc.countDebug("找能量接口（一键收取）")
     } else if (collectEnergyEnabled) {
-        Log.forest(FOREST_TAG, "一键收取开关关闭，跳过找能量接口")
+        Log.forest("一键收取开关关闭，跳过找能量接口")
         tc.countDebug("跳过找能量接口（一键收取未开启）")
     } else {
-        Log.forest(FOREST_TAG, "收集能量开关关闭，跳过找能量接口")
+        Log.forest("收集能量开关关闭，跳过找能量接口")
         tc.countDebug("跳过找能量接口（收集能量未开启）")
     }
 
     if (collectEnergyEnabled && pkEnergy?.value == true) {
-        Log.forest(FOREST_TAG, "🚀 执行PK排行榜补全（协程）")
+        Log.forest("🚀 执行PK排行榜补全（协程）")
         collectPKEnergyCoroutine()
         tc.countDebug("PK排行榜补全（同步）")
     } else if (pkEnergy?.value == true) {
-        Log.forest(FOREST_TAG, "收集能量开关关闭，跳过PK排行榜补全")
+        Log.forest("收集能量开关关闭，跳过PK排行榜补全")
         tc.countDebug("跳过PK排行榜补全（收集能量未开启）")
     } else {
         tc.countDebug("跳过PK排行榜补全（未开启）")
     }
 
     if (hasFriendRankingWorkEnabled()) {
-        Log.forest(FOREST_TAG, "🚀 执行好友排行榜补全（协程）")
+        Log.forest("🚀 执行好友排行榜补全（协程）")
         collectFriendEnergyCoroutine()
         tc.countDebug("好友排行榜补全（同步）")
     } else {
-        Log.forest(FOREST_TAG, "收集能量、领取礼盒和复活能量均未开启，跳过好友排行榜扫描")
+        Log.forest("收集能量、领取礼盒和复活能量均未开启，跳过好友排行榜扫描")
         tc.countDebug("跳过好友排行榜扫描（无收取/礼盒/复活需求）")
     }
 
-    Log.forest(FOREST_TAG, "🌳 【正常流程】补充检查自己的森林主页...")
+    Log.forest("🌳 【正常流程】补充检查自己的森林主页...")
     val finalSelfHomeObj = querySelfHome()
     if (finalSelfHomeObj != null) {
         selfHomeObj = finalSelfHomeObj
         if (collectEnergyEnabled) {
             collectEnergy(UserMap.currentUid, finalSelfHomeObj, "self")
-            Log.forest(FOREST_TAG, "✅ 【正常流程】补充检查自己能量完成")
+            Log.forest("✅ 【正常流程】补充检查自己能量完成")
             tc.countDebug("补充检查自己的能量")
         } else {
             tc.countDebug("跳过补充检查自己的能量（未开启）")
@@ -142,7 +142,7 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(selfHomeObj: JSONOb
             EcoLife.ecoLife()
             tc.countDebug("绿色行动")
         } else {
-            Log.forest(FOREST_TAG, "绿色行动未到执行时间，跳过")
+            Log.forest("绿色行动未到执行时间，跳过")
         }
     }
 
@@ -172,7 +172,7 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(selfHomeObj: JSONOb
             }
             tc.countDebug("能量雨")
         } else {
-            Log.forest(FOREST_TAG, "能量雨未到执行时间，跳过")
+            Log.forest("能量雨未到执行时间，跳过")
         }
     }
 
