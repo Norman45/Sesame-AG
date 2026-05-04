@@ -141,6 +141,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     @Volatile
     private var robMultiplierCardEndTime: Long = 0
 
+    @Volatile
+    private var robMultiplierCardFactor: Double = 0.0
+
+    @Volatile
+    private var robMultiplierCardPropType: String = ""
+
+    @Volatile
+    private var robMultiplierCardPropName: String = ""
+
     private val delayTimeMath = Average(5)
     private val collectEnergyLockLimit = ObjReference(0L)
     private val doubleCardLockObj = Any()
@@ -291,6 +300,22 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var cachedBagObject: JSONObject? = null
     private var lastQueryPropListTime: Long = 0
     private var lastUsePropCheckTime: Long = 0
+
+    private data class RobMultiplierCardState(
+        val propName: String,
+        val propType: String,
+        val factor: Double,
+        val endTime: Long
+    )
+
+    private data class RobMultiplierCandidate(
+        val prop: JSONObject,
+        val propName: String,
+        val propType: String,
+        val factor: Double,
+        val durationMs: Long,
+        val expireTime: Long
+    )
 
     // {{ 新增接口定义：收自己能量的方式 }}
     interface CollectSelfType {
@@ -3351,7 +3376,20 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     "robExpandCard" -> {
                         val extInfo = userUsingProp.optString("extInfo")
                         robMultiplierCardEndTime = userUsingProp.getLong("endTime")
-                        Log.forest("$propName 剩余时间⏰：" + formatTimeDifference(robMultiplierCardEndTime - System.currentTimeMillis()))
+                        robMultiplierCardPropName = propName
+                        robMultiplierCardPropType = userUsingProp.optString("propType")
+                        robMultiplierCardFactor = parseRobMultiplierFactor(
+                            robMultiplierCardPropType,
+                            propName,
+                            userUsingProp.optJSONObject("detail"),
+                            userUsingProp.optString("description")
+                        )
+                        val factorSuffix = if (robMultiplierCardFactor > 0.0) {
+                            "，倍率${formatRobMultiplierFactor(robMultiplierCardFactor)}倍"
+                        } else {
+                            ""
+                        }
+                        Log.forest("$propName 剩余时间⏰：" + formatTimeDifference(robMultiplierCardEndTime - System.currentTimeMillis()) + factorSuffix)
                         if (!extInfo.isEmpty()) {
                             val extInfoObj = runCatching { JSONObject(extInfo) }.getOrNull()
                             if (extInfoObj == null) {
@@ -4364,7 +4402,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
              * 2. 获取当前时间及各类道具的到期时间，计算剩余时间。
              * 3. 根据以下条件判断是否需要使用特定道具:
              *    - needDouble: 双击卡开关已打开，且当前没有生效的双击卡。
-             *    - needRobMultiplierCard: 收好友N倍卡开关已打开，且当前没有生效的卡。
+             *    - needRobMultiplierCard: 收好友N倍卡开关已打开，且当前目标是好友能量；具体是否使用由倍率/延期策略决定。
              *    - needStealth: 隐身卡开关已打开，且当前没有生效的隐身卡。
              *    - needShield: 保护罩开关已打开，炸弹卡开关已关闭，且保护罩剩余时间不足一天。
              *    - needEnergyBombCard: 炸弹卡开关已打开，保护罩开关已关闭，且炸弹卡剩余时间不足三天。
@@ -4379,8 +4417,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     now
                 )
 
+            val isFriendCollectTarget = !userId.isNullOrBlank() && userId != UserMap.currentUid
             val needRobMultiplierCard =
-                robMultiplierCard!!.value != ApplyPropType.CLOSE && robMultiplierCardEndTime < now
+                isFriendCollectTarget && robMultiplierCard!!.value != ApplyPropType.CLOSE
             val needStealth =
                 stealthCard!!.value != ApplyPropType.CLOSE && stealthEndTime < now
 
@@ -5154,6 +5193,83 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         return configName?.takeIf { it.isNotBlank() } ?: getPropType(propObject)
     }
 
+    private fun parseRobMultiplierFactor(
+        propType: String?,
+        propName: String? = null,
+        detail: JSONObject? = null,
+        desc: String? = null
+    ): Double {
+        detail?.optString("factor")
+            ?.toDoubleOrNull()
+            ?.takeIf { it > 0.0 }
+            ?.let { return it }
+
+        val candidates = listOf(propType, propName, desc).filterNot { it.isNullOrBlank() }
+        val patterns = arrayOf(
+            Regex("""ROB_EXPAND_CARD_(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE),
+            Regex("""(\d+(?:\.\d+)?)\s*倍""")
+        )
+        for (text in candidates) {
+            for (pattern in patterns) {
+                val factor = pattern.find(text.orEmpty())
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toDoubleOrNull()
+                if (factor != null && factor > 0.0) {
+                    return factor
+                }
+            }
+        }
+        return 0.0
+    }
+
+    private fun getRobMultiplierFactor(propObject: JSONObject?): Double {
+        val propConfig = propObject?.optJSONObject("propConfigVO")
+        return parseRobMultiplierFactor(
+            getPropType(propObject),
+            getPropName(propObject),
+            propConfig?.optJSONObject("detail"),
+            propConfig?.optString("desc")
+        )
+    }
+
+    private fun getRobMultiplierDurationMs(propObject: JSONObject?): Long {
+        val durationSeconds = propObject?.optJSONObject("propConfigVO")?.optLong("durationTime", 0L) ?: 0L
+        return if (durationSeconds > 0L) durationSeconds * 1000L else 0L
+    }
+
+    private fun isRobMultiplierProp(propType: String): Boolean {
+        return propType.contains("ROB_EXPAND", ignoreCase = true)
+    }
+
+    private fun isLimitedRobMultiplierProp(propType: String): Boolean {
+        return propType.contains("LIMIT_TIME", ignoreCase = true) ||
+                propType.contains("DAY", ignoreCase = true)
+    }
+
+    private fun isSameRobMultiplierFactor(a: Double, b: Double): Boolean {
+        return abs(a - b) < ROB_MULTIPLIER_FACTOR_EPS
+    }
+
+    private fun formatRobMultiplierFactor(factor: Double): String {
+        if (factor <= 0.0) {
+            return "未知"
+        }
+        return String.format(Locale.US, "%.2f", factor).trimEnd('0').trimEnd('.')
+    }
+
+    private fun currentRobMultiplierState(now: Long = System.currentTimeMillis()): RobMultiplierCardState? {
+        if (robMultiplierCardEndTime <= now) {
+            return null
+        }
+        return RobMultiplierCardState(
+            robMultiplierCardPropName.ifBlank { "生效中N倍卡" },
+            robMultiplierCardPropType,
+            robMultiplierCardFactor,
+            robMultiplierCardEndTime
+        )
+    }
+
     private fun hasPropStock(propObject: JSONObject?): Boolean {
         if (propObject == null) {
             return false
@@ -5204,31 +5320,114 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         return boostProps.firstOrNull()
     }
 
-    private fun selectPreferredRobMultiplierProp(bagObject: JSONObject?): JSONObject? {
-        val robMultiplierProps = collectAvailablePropsByGroup(bagObject, "robExpandCard")
-        if (robMultiplierProps.isEmpty()) {
-            return null
-        }
+    private fun collectRobMultiplierCandidates(bagObject: JSONObject?): MutableList<RobMultiplierCandidate> {
+        val candidates: MutableList<RobMultiplierCandidate> = ArrayList()
         val choice = robMultiplierCard?.value ?: ApplyPropType.CLOSE
-        val filteredProps = robMultiplierProps.filter { prop ->
-            if (choice != ApplyPropType.ONLY_LIMIT_TIME) {
-                true
-            } else {
-                val propType = getPropType(prop)
-                propType.contains("LIMIT_TIME") || propType.contains("DAY")
+        for (prop in collectAvailablePropsByGroup(bagObject, "robExpandCard")) {
+            val propType = getPropType(prop)
+            if (choice == ApplyPropType.ONLY_LIMIT_TIME && !isLimitedRobMultiplierProp(propType)) {
+                continue
             }
-        }.toMutableList()
-        if (filteredProps.isEmpty()) {
-            return null
+            val factor = getRobMultiplierFactor(prop)
+            if (factor <= 0.0) {
+                Log.forest("跳过收好友N倍卡[${getPropName(prop)}]，无法识别倍率，避免误用")
+                continue
+            }
+            candidates.add(
+                RobMultiplierCandidate(
+                    prop = prop,
+                    propName = getPropName(prop),
+                    propType = propType,
+                    factor = factor,
+                    durationMs = getRobMultiplierDurationMs(prop),
+                    expireTime = prop.optLong("recentExpireTime", Long.MAX_VALUE)
+                )
+            )
         }
+        return candidates
+    }
+
+    private fun sortRobMultiplierCandidates(candidates: MutableList<RobMultiplierCandidate>) {
         Collections.sort(
-            filteredProps,
-            Comparator { p1: JSONObject?, p2: JSONObject? ->
-                p1!!.optLong("recentExpireTime", Long.MAX_VALUE)
-                    .compareTo(p2!!.optLong("recentExpireTime", Long.MAX_VALUE))
+            candidates,
+            Comparator { c1: RobMultiplierCandidate, c2: RobMultiplierCandidate ->
+                when {
+                    !isSameRobMultiplierFactor(c1.factor, c2.factor) -> c2.factor.compareTo(c1.factor)
+                    c1.expireTime != c2.expireTime -> c1.expireTime.compareTo(c2.expireTime)
+                    else -> c1.durationMs.compareTo(c2.durationMs)
+                }
             }
         )
-        return filteredProps.firstOrNull()
+    }
+
+    private fun selectPreferredRobMultiplierProp(
+        bagObject: JSONObject?,
+        now: Long = System.currentTimeMillis()
+    ): RobMultiplierCandidate? {
+        val candidates = collectRobMultiplierCandidates(bagObject)
+        if (candidates.isEmpty()) {
+            return null
+        }
+        val active = currentRobMultiplierState(now)
+        if (active == null) {
+            sortRobMultiplierCandidates(candidates)
+            val selected = candidates.firstOrNull()
+            if (selected != null) {
+                Log.forest("当前无生效收好友N倍卡，选择${formatRobMultiplierFactor(selected.factor)}倍卡[${selected.propName}]")
+            }
+            return selected
+        }
+
+        val activeRemainingMs = active.endTime - now
+        if (active.factor <= 0.0) {
+            Log.forest("当前收好友N倍卡[${active.propName}]倍率未知，跳过自动替换/延期，避免误用")
+            return null
+        }
+
+        val higherCandidates = candidates.filter { it.factor > active.factor + ROB_MULTIPLIER_FACTOR_EPS }
+            .toMutableList()
+        val safeHigherCandidates = higherCandidates.filter { it.durationMs >= activeRemainingMs }
+            .toMutableList()
+        if (safeHigherCandidates.isNotEmpty()) {
+            sortRobMultiplierCandidates(safeHigherCandidates)
+            val selected = safeHigherCandidates.first()
+            Log.forest(
+                "准备用更高倍率${formatRobMultiplierFactor(selected.factor)}倍卡[${selected.propName}]" +
+                        "替换当前${formatRobMultiplierFactor(active.factor)}倍卡，候选时长不短于当前剩余时间"
+            )
+            return selected
+        } else if (higherCandidates.isNotEmpty()) {
+            sortRobMultiplierCandidates(higherCandidates)
+            val bestHigher = higherCandidates.first()
+            Log.forest(
+                "跳过更高倍率${formatRobMultiplierFactor(bestHigher.factor)}倍卡[${bestHigher.propName}]，" +
+                        "候选时长${formatTimeDifference(bestHigher.durationMs)}短于当前剩余${formatTimeDifference(activeRemainingMs)}，避免替换浪费"
+            )
+        }
+
+        val sameFactorCandidates = candidates.filter {
+            isSameRobMultiplierFactor(it.factor, active.factor)
+        }.toMutableList()
+        if (sameFactorCandidates.isNotEmpty()) {
+            if (activeRemainingMs < ROB_MULTIPLIER_PROLONG_THRESHOLD_MS) {
+                sortRobMultiplierCandidates(sameFactorCandidates)
+                val selected = sameFactorCandidates.first()
+                Log.forest(
+                    "当前${formatRobMultiplierFactor(active.factor)}倍卡剩余${formatTimeDifference(activeRemainingMs)}，" +
+                            "满足少于14天延期条件，选择[${selected.propName}]"
+                )
+                return selected
+            }
+            Log.forest(
+                "当前${formatRobMultiplierFactor(active.factor)}倍卡剩余${formatTimeDifference(activeRemainingMs)}，" +
+                        "不少于14天，跳过同倍率延期"
+            )
+        }
+
+        if (candidates.any { it.factor + ROB_MULTIPLIER_FACTOR_EPS < active.factor }) {
+            Log.forest("背包中仅有低倍率收好友N倍卡或不满足安全替换条件，跳过使用，避免降低当前收益")
+        }
+        return null
     }
 
     /**
@@ -5301,6 +5500,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      * @param propJsonObj 道具对象
      * @param needRefreshHome 是否需要刷新主页（默认true。加速卡等紧接着会查询主页的场景可设为false以优化延迟）
      */
+    private fun unwrapResData(response: JSONObject): JSONObject {
+        return response.optJSONObject("resData") ?: response
+    }
+
     private fun usePropBag(propJsonObj: JSONObject?, needRefreshHome: Boolean = true): Boolean {
         if (propJsonObj == null) {
             Log.forest("要使用的道具不存在！")
@@ -5332,14 +5535,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     resData = checkResponse
                 }
                 val status = resData.optString("usePropStatus")
-                if ("NEED_CONFIRM_CAN_PROLONG" == status || "REPLACE" == status) {
+                if (status.startsWith("NEED_CONFIRM") || "REPLACE" == status) {
                     // 情况1: 需要二次确认 (真正地续写)
                     Log.forest(propName + "需要二次确认，发送确认请求...")
                     val confirmResponseStr =
                         AntForestRpcCall.consumeProp(propGroup, propId, propType, true)
                     jo = JSONObject(confirmResponseStr)
                     // 提取道具名称用于日志显示
-                    val userPropVO = jo.optJSONObject("userPropVO")
+                    val userPropVO = unwrapResData(jo).optJSONObject("userPropVO")
                     val usedPropName = userPropVO?.optString("propName") ?: propName
                     Log.forest("已使用$usedPropName")
 
@@ -5353,13 +5556,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 val consumeResponse = AntForestRpcCall.consumeProp2(propGroup, propId, propType)
                 jo = JSONObject(consumeResponse)
                 // 提取道具名称用于日志显示
-                val userPropVO = jo.optJSONObject("userPropVO")
+                val userPropVO = unwrapResData(jo).optJSONObject("userPropVO")
                 val usedPropName = userPropVO?.optString("propName") ?: propName
                 Log.forest("已使用$usedPropName")
             }
 
             // 统一结果处理
-            if (ResChecker.checkRes(TAG + "使用道具失败:", jo)) {
+            val resultData = unwrapResData(jo)
+            if (ResChecker.checkRes(TAG + "使用道具失败:", resultData)) {
                 invalidatePropBagCache()
                 // ⚡ 优化点：根据参数决定是否执行耗时的刷新操作
                 if (needRefreshHome) {
@@ -5367,10 +5571,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
                 return true
             } else {
-                var errorData = jo.optJSONObject("resData")
-                if (errorData == null) {
-                    errorData = jo
-                }
+                val errorData = resultData
                 val resultCode = errorData.optString("resultCode")
                     .ifBlank { jo.optString("resultCode") }
                 val resultDesc = errorData.optString("resultDesc")
@@ -5451,6 +5652,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         return propType.contains("SHIELD") // 保护罩
                 || propType.contains("BOMB_CARD") // 炸弹卡
                 || propType.contains("DOUBLE_CLICK") // 双击卡
+                || isRobMultiplierProp(propType) // 收好友N倍卡，支持延期/替换二次确认
     }
 
     /**
@@ -5797,14 +5999,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     private fun useRobMultiplierCard(bag: JSONObject? = queryPropList()) {
         try {
-            if (robMultiplierCardEndTime > System.currentTimeMillis()) {
-                Log.forest("收好友N倍卡已生效，剩余${formatTimeDifference(robMultiplierCardEndTime - System.currentTimeMillis())}，跳过重复使用"
-                )
+            val now = System.currentTimeMillis()
+            val selected = selectPreferredRobMultiplierProp(bag, now)
+            if (selected == null) {
+                Log.forest("背包中无可用或无需使用的收好友N倍卡")
                 return
             }
-            val jo = selectPreferredRobMultiplierProp(bag)
-            val propType = getPropType(jo)
-            if (jo != null && !propType.contains("LIMIT_TIME") && !propType.contains("DAY")) {
+            if (!isLimitedRobMultiplierProp(selected.propType)) {
                 val decision = evaluateTriggerDecision(robMultiplierCardTime, StatusFlags.FLAG_ANTFOREST_ROB_MULTIPLIER_CARD_TRIGGER_INDEX)
                 if (decision?.allowNow != true) {
                     logTriggerWaiting("收好友N倍卡", decision)
@@ -5812,10 +6013,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
                 consumeTriggerSlot(StatusFlags.FLAG_ANTFOREST_ROB_MULTIPLIER_CARD_TRIGGER_INDEX, decision.matchedSlotIndex)
             }
-            if (jo != null && usePropBag(jo)) {
-                robMultiplierCardEndTime = System.currentTimeMillis() + 1000 * 60 * 5
+            if (usePropBag(selected.prop)) {
+                val fallbackDuration = selected.durationMs.takeIf { it > 0L } ?: (5 * TimeFormatter.ONE_MINUTE_MS)
+                robMultiplierCardEndTime = maxOf(robMultiplierCardEndTime, now + fallbackDuration)
+                robMultiplierCardFactor = selected.factor
+                robMultiplierCardPropType = selected.propType
+                robMultiplierCardPropName = selected.propName
             } else {
-                Log.forest("背包中无可用收好友N倍卡")
+                Log.forest("收好友N倍卡[${selected.propName}]使用失败")
             }
         } catch (th: Throwable) {
             Log.printStackTrace(TAG, "useRobMultiplierCard err", th)
@@ -6419,6 +6624,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         private const val FRIEND_HOME_MIN_INTERVAL_MS = 2000
         private const val GIFT7TH_SIGN_SCENE_CODE = "ANTFOREST_GIFT7TH_SIGN_202506"
         private const val GIFT7TH_SIGN_SOURCE = "chInfo_ch_appcenter__chsub_9patch"
+        private const val ROB_MULTIPLIER_PROLONG_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000L
+        private const val ROB_MULTIPLIER_FACTOR_EPS = 0.0001
 
         @JvmField
         var instance: AntForest? = null
