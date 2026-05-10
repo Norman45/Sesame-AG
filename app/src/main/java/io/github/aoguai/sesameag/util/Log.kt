@@ -175,6 +175,11 @@ object Log {
     }
 
     @JvmStatic
+    fun fishpond(msg: String) {
+        business(LogChannel.FISHPOND, msg)
+    }
+
+    @JvmStatic
     fun sports(msg: String) {
         business(LogChannel.SPORTS, msg)
     }

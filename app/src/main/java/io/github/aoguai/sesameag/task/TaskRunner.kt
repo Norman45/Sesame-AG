@@ -9,6 +9,7 @@ import io.github.aoguai.sesameag.model.BaseModel
 import io.github.aoguai.sesameag.model.CustomSettings
 import io.github.aoguai.sesameag.model.Model
 import io.github.aoguai.sesameag.task.antFarm.AntFarm
+import io.github.aoguai.sesameag.task.antFishPond.AntFishPond
 import io.github.aoguai.sesameag.task.antForest.AntForest
 import io.github.aoguai.sesameag.task.antMember.AntMember
 import io.github.aoguai.sesameag.task.antOcean.AntOcean
@@ -229,12 +230,17 @@ class CoroutineTaskRunner(allModels: List<Model>) {
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
 
-            // 5) 庄园尽量承接前面模块已完成的联动任务状态，减少碎片奖励漏领。
+            // 5) 福气鱼池放在农场之后，保持独立玩法批次。
+            takeBatch { it is AntFishPond }
+                .takeIf { it.isNotEmpty() }
+                ?.let(::add)
+
+            // 6) 庄园尽量承接前面模块已完成的联动任务状态，减少碎片奖励漏领。
             takeBatch { it is AntFarm }
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
 
-            // 6) 会员与芝麻信用放在联动行为之后。
+            // 7) 会员与芝麻信用放在联动行为之后。
             takeBatch { it is AntMember || it is AntSesameCredit }
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)

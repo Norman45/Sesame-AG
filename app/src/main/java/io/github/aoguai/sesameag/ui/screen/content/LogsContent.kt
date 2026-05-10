@@ -96,7 +96,7 @@ private fun iconFor(channel: LogChannel): ImageVector {
     return when (channel) {
         LogChannel.FOREST -> Icons.Rounded.Forest
         LogChannel.DODO -> Icons.Rounded.Description
-        LogChannel.ORCHARD, LogChannel.FARM, LogChannel.STALL -> Icons.Rounded.Agriculture
+        LogChannel.ORCHARD, LogChannel.FISHPOND, LogChannel.FARM, LogChannel.STALL -> Icons.Rounded.Agriculture
         LogChannel.MEMBER, LogChannel.SESAME_CREDIT -> Icons.Rounded.CardMembership
         LogChannel.SPORTS -> Icons.AutoMirrored.Rounded.DirectionsRun
         LogChannel.DEBUG, LogChannel.RUNTIME -> Icons.Rounded.BugReport

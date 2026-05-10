@@ -208,6 +208,34 @@ private val forestDefaultBlacklist = setOf(
     "去会员抢演唱会门票"     // 活动已完结
 )
 
+private val fishPondDefaultBlacklist = setOf(
+    // 福气鱼池：游戏、订阅、分享、翻倍广告等任务缺少稳定自动完成闭环
+    "FISHPOND_NCLY_GAME",
+    "FISHPOND_NCLY_GAME_BWXRK_30S",
+    "FISHPOND_NCLY_GAME_SGBHSD_30S",
+    "FISHPOND_NCLY_GAME_NCDDP_PLAY1",
+    "FISHPOND_NCLY_GAME_CGNNC_PLAY1",
+    "FISHPOND_NCLY_GAME_MSQYJ_PLAY",
+    "NORMAL_RENMENYOUXI",
+    "TASK_SUBSCRIBE",
+    "ANTFISHPOND_WECHAT_SHARE",
+    "LOTTERY_PLUS",
+    "RESCUE_AD",
+    "RESULT_DOUBLE_AD",
+    "FLOAT_GAME_AD",
+    "玩保卫向日葵30s",
+    "玩三国冰河时代30s",
+    "农场对对碰匹配5组",
+    "闯关挪挪车通过1关",
+    "美食奇遇记合成10次",
+    "开启领钓竿提醒",
+    "去玩热门小游戏",
+    "送福袋 我也得福袋",
+    "钓鱼结果页翻倍",
+    "补救广告",
+    "浮球游戏广告"
+)
+
 private val yuebaoDefaultBlacklist = setOf(
     // 余额宝
     "余额宝体验金签到(10元)",
@@ -276,5 +304,6 @@ val DEFAULT_BLACKLIST: Map<String, Set<String>> = mapOf(
     "黄金票" to goldTicketDefaultBlacklist,
     "支付宝会员" to memberDefaultBlacklist,
     "运动" to sportsDefaultBlacklist,
-    "神奇物种" to dodoDefaultBlacklist
+    "神奇物种" to dodoDefaultBlacklist,
+    "福气鱼池" to fishPondDefaultBlacklist
 )

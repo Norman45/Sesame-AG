@@ -9,6 +9,7 @@ enum class LogModuleDomain(val displayName: String) {
     OCEAN("神奇海洋"),
     DODO("神奇物种"),
     MEMBER("会员"),
+    FISHPOND("福气鱼池"),
     SPORTS("运动"),
     GREEN_FINANCE("绿色经营"),
     SESAME_CREDIT("芝麻信用"),
@@ -160,6 +161,17 @@ enum class LogChannel(
         mirrorToRecord = true,
         visibleInViewer = true,
         logTag = "会员"
+    ),
+    FISHPOND(
+        loggerName = "fishpond",
+        displayName = "福气鱼池日志",
+        moduleDomain = LogModuleDomain.FISHPOND,
+        techKind = LogTechKind.BUSINESS,
+        description = "福气鱼池钓竿、任务、钓鱼与兑换进度相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+        logTag = "福气鱼池"
     ),
     SPORTS(
         loggerName = "sports",
