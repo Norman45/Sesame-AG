@@ -44,6 +44,9 @@ object StatusFlags {
     /** 今日健康岛签到是否已处理 */
     const val FLAG_NEVERLAND_SIGN_DONE: String = "AntSports::neverlandDoSign::已签到"
 
+    /** 健康岛：今日独立浏览任务是否已处理 */
+    const val FLAG_NEVERLAND_LIGHT_FEEDS_DONE = "AntSports::neverlandLightFeedsDone"
+
     // ============================================================
     // AntForest（蚂蚁森林）
     // ============================================================
@@ -114,6 +117,15 @@ object StatusFlags {
 
     /** 会员积分权益兑换：今日已完成权益列表刷新/扫描 */
     const val FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE: String = "memberBenefit::refresh"
+
+    /** 今日游戏中心签到、平台任务、乐豆和赚现金签到是否已处理 */
+    const val FLAG_ANTMEMBER_GAME_CENTER_DONE = "AntMember::gameCenterDone"
+
+    /** 今日安心豆签到与守护者奖励是否已处理 */
+    const val FLAG_ANTMEMBER_BEAN_SIGN_DONE = "AntMember::beanSignInDone"
+
+    /** 今日蚂蚁保保障金是否已处理 */
+    const val FLAG_ANTMEMBER_INSURED_GOLD_DONE = "AntMember::insuredGoldDone"
 
     // ============================================================
     // 芝麻信用 / 芝麻粒

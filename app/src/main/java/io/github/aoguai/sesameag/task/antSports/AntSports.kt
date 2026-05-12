@@ -4860,6 +4860,11 @@ class AntSports : ModelTask() {
          * @brief 循环处理健康岛任务大厅中的 PROMOKERNEL_TASK & LIGHT_TASK
          */
         private fun loopHandleTaskCenter() {
+            if (Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_TASK_CENTER_DONE)) {
+                Log.sports("健康岛任务大厅今日已处理，跳过")
+                return
+            }
+
             var errorCount = 0
             Log.sports("开始循环处理任务大厅（失败限制：$MAX_ERROR_COUNT 次）")
 
@@ -4883,6 +4888,7 @@ class AntSports : ModelTask() {
                     val taskList = taskCenterResp.getJSONObject("data").optJSONArray("taskCenterTaskVOS")
                     if (taskList == null || taskList.length() == 0) {
                         Log.sports("任务中心为空，无任务可处理")
+                        Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_TASK_CENTER_DONE)
                         break
                     }
 
@@ -4918,6 +4924,7 @@ class AntSports : ModelTask() {
 
                     if (pendingTasks.isEmpty()) {
                         Log.sports("没有可处理或领取的任务，退出循环")
+                        Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_TASK_CENTER_DONE)
                         break
                     }
 
@@ -5019,6 +5026,11 @@ class AntSports : ModelTask() {
          */
         private fun handleHealthIslandTask() {
             try {
+                if (Status.hasFlagToday(StatusFlags.FLAG_NEVERLAND_LIGHT_FEEDS_DONE)) {
+                    Log.sports("健康岛浏览任务今日已处理，跳过")
+                    return
+                }
+
                 Log.sports("开始检查健康岛浏览任务")
                 var hasTask = true
                 val completedEncryptValues = mutableSetOf<String>()
@@ -5041,6 +5053,7 @@ class AntSports : ModelTask() {
                     val taskInfos = taskInfoResp.getJSONObject("data").optJSONArray("taskInfos")
                     if (taskInfos == null || taskInfos.length() == 0) {
                         Log.sports("健康岛浏览任务列表为空")
+                        Status.setFlagToday(StatusFlags.FLAG_NEVERLAND_LIGHT_FEEDS_DONE)
                         hasTask = false
                         continue
                     }
@@ -5048,6 +5061,7 @@ class AntSports : ModelTask() {
                     val pendingTaskInfos = mutableListOf<JSONObject>()
                     val roundEncryptValues = mutableSetOf<String>()
                     var repeatedTaskCount = 0
+                    var invalidTaskCount = 0
 
                     for (i in 0 until taskInfos.length()) {
                         val taskInfo = taskInfos.getJSONObject(i)
@@ -5057,6 +5071,7 @@ class AntSports : ModelTask() {
                         val energyNum = taskInfo.optInt("energyNum", 0)
 
                         if (encryptValue.isEmpty()) {
+                            invalidTaskCount++
                             Log.error(
                                 TAG,
                                 "健康岛任务[$taskTitle] encryptValue 为空，跳过 [viewSec=$viewSec][energyNum=$energyNum]"
@@ -5077,6 +5092,9 @@ class AntSports : ModelTask() {
                         if (repeatedTaskCount > 0) {
                             Log.sports("健康岛浏览任务本轮仅返回已处理任务，停止循环以避免重复完成[count=$repeatedTaskCount]"
                             )
+                        }
+                        if (invalidTaskCount == 0) {
+                            Status.setFlagToday(StatusFlags.FLAG_NEVERLAND_LIGHT_FEEDS_DONE)
                         }
                         hasTask = false
                         continue

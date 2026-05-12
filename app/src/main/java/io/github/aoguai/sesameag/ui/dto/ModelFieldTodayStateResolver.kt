@@ -79,6 +79,16 @@ object ModelFieldTodayStateResolver {
             "AntForest.vitalityExchangeList" ->
                 vitalityExchangeState(modelFields)
 
+            "AntForest.forestChouChouLe" ->
+                allFlags(
+                    StatusFlags.FLAG_ANTFOREST_CHOUCHOULE_NORMAL_COMPLETED,
+                    StatusFlags.FLAG_ANTFOREST_CHOUCHOULE_ACTIVITY_COMPLETED,
+                    reason = "今日森林寻宝任务已处理"
+                )
+
+            "AntForest.userPatrol" ->
+                flag(StatusFlags.FLAG_ANTFOREST_PATROL_CHANCE_EXCHANGE_LIMIT, "今日保护地巡护机会兑换已达上限")
+
             "AntMember.memberSign" ->
                 flag(StatusFlags.FLAG_ANTMEMBER_MEMBER_SIGN_DONE, "今日会员签到已处理")
 
@@ -102,6 +112,15 @@ object ModelFieldTodayStateResolver {
                     StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE,
                     "今日会员积分兑换权益已处理"
                 )
+
+            "AntMember.enableGameCenter" ->
+                flag(StatusFlags.FLAG_ANTMEMBER_GAME_CENTER_DONE, "今日游戏中心已处理")
+
+            "AntMember.beanSignIn" ->
+                flag(StatusFlags.FLAG_ANTMEMBER_BEAN_SIGN_DONE, "今日安心豆签到已处理")
+
+            "AntMember.collectInsuredGold" ->
+                flag(StatusFlags.FLAG_ANTMEMBER_INSURED_GOLD_DONE, "今日蚂蚁保保障金已处理")
 
             "AntSesameCredit.sesameTask" ->
                 flag(StatusFlags.FLAG_SESAME_DO_ALL_AVAILABLE_TASK, "今日芝麻信用任务已处理")

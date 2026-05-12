@@ -135,15 +135,23 @@ class AntMember : ModelTask() {
         NON_RETRYABLE
     }
 
+    private enum class DailyTaskProcessResult {
+        HANDLED,
+        RETRYABLE_FAILURE,
+        UNKNOWN_FAILURE
+    }
+
     private enum class InsuredGoldRpcFailureType {
         BUSINESS_LIMIT,
         DUPLICATE_REWARD,
+        RETRYABLE,
         NON_RETRYABLE
     }
 
     private enum class GuardianBeanAwardRpcFailureType {
         BUSINESS_LIMIT,
         DUPLICATE_REWARD,
+        RETRYABLE,
         NON_RETRYABLE
     }
 
@@ -1485,6 +1493,11 @@ class AntMember : ModelTask() {
      */
     private suspend fun collectInsuredGold(): Unit = CoroutineUtils.run {
         try {
+            if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_INSURED_GOLD_DONE)) {
+                Log.member("保障金🏥[今日已处理，跳过]")
+                return@run
+            }
+
             var s = AntMemberRpcCall.queryAvailableCollectInsuredGold()
             var jo = JSONObject(s)
             if (!ResChecker.checkRes(TAG, jo)) {
@@ -1496,12 +1509,17 @@ class AntMember : ModelTask() {
                 Log.error("$TAG.collectInsuredGold.queryInsuredHome", "保障金🏥[响应缺少data]#$s")
                 return@run
             }
+            var availableCount = 0
+            var allHandled = true
             val signInBall = data.optJSONObject("signInDTO")
             if (signInBall != null &&
                 1 == signInBall.optInt("sendFlowStatus") &&
                 1 == signInBall.optInt("sendType")
             ) {
-                collectSingleInsuredGold(signInBall, true)
+                availableCount++
+                if (collectSingleInsuredGold(signInBall, true) != DailyTaskProcessResult.HANDLED) {
+                    allHandled = false
+                }
             }
             val otherBallList = data.optJSONArray("eventToWaitDTOList")
             if (otherBallList != null) {
@@ -1510,26 +1528,31 @@ class AntMember : ModelTask() {
                     if (anotherBall.optInt("sendType") != 1) {
                         continue
                     }
-                    collectSingleInsuredGold(anotherBall, false)
+                    availableCount++
+                    if (collectSingleInsuredGold(anotherBall, false) != DailyTaskProcessResult.HANDLED) {
+                        allHandled = false
+                    }
                 }
+            }
+            if (availableCount == 0 || allHandled) {
+                setFlagToday(StatusFlags.FLAG_ANTMEMBER_INSURED_GOLD_DONE)
             }
         } catch (t: Throwable) {
             Log.printStackTrace("$TAG.collectInsuredGold", t)
         }
     }
 
-    private fun collectSingleInsuredGold(goldBall: JSONObject, isSignIn: Boolean): Boolean {
+    private fun collectSingleInsuredGold(goldBall: JSONObject, isSignIn: Boolean): DailyTaskProcessResult {
         val title = resolveInsuredGoldTitle(goldBall, isSignIn)
         if (goldBall.optString("sendFlowNo").isBlank()) {
             Log.member("保障金🏥[$title]#缺少sendFlowNo，跳过")
-            return false
+            return DailyTaskProcessResult.UNKNOWN_FAILURE
         }
         val requestObject = buildInsuredGoldGainRequest(goldBall, isSignIn)
         val response = AntMemberRpcCall.collectInsuredGold(requestObject)
         val responseObject = JSONObject(response)
         if (!ResChecker.checkRes(TAG, responseObject)) {
-            logInsuredGoldFailure(title, responseObject, response)
-            return false
+            return logInsuredGoldFailure(title, responseObject, response)
         }
         val gainGold = extractInsuredGoldGainYuan(responseObject)
         if (gainGold.isBlank()) {
@@ -1537,7 +1560,7 @@ class AntMember : ModelTask() {
         } else {
             Log.member("保障金🏥[$title]#+" + gainGold + "元")
         }
-        return true
+        return DailyTaskProcessResult.HANDLED
     }
 
     private fun buildInsuredGoldGainRequest(goldBall: JSONObject, isSignIn: Boolean): JSONObject {
@@ -1585,7 +1608,11 @@ class AntMember : ModelTask() {
         }
     }
 
-    private fun logInsuredGoldFailure(title: String, responseObject: JSONObject, rawResponse: String) {
+    private fun logInsuredGoldFailure(
+        title: String,
+        responseObject: JSONObject,
+        rawResponse: String
+    ): DailyTaskProcessResult {
         val code = sequenceOf(
             responseObject.optString("resultCode"),
             responseObject.optString("code"),
@@ -1605,15 +1632,26 @@ class AntMember : ModelTask() {
             message.isNotBlank() -> message
             else -> rawResponse
         }
-        when (classifyInsuredGoldFailure(code, message)) {
-            InsuredGoldRpcFailureType.DUPLICATE_REWARD ->
+        return when (classifyInsuredGoldFailure(code, message)) {
+            InsuredGoldRpcFailureType.DUPLICATE_REWARD -> {
                 Log.member("保障金🏥[$title]#已领取或重复领取，跳过:$detail")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            InsuredGoldRpcFailureType.BUSINESS_LIMIT ->
+            InsuredGoldRpcFailureType.BUSINESS_LIMIT -> {
                 Log.member("保障金🏥[$title]#业务受限，本轮跳过:$detail")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            InsuredGoldRpcFailureType.NON_RETRYABLE ->
+            InsuredGoldRpcFailureType.RETRYABLE -> {
+                Log.member("保障金🏥[$title]#暂时不可领取，保留后续重试:$detail")
+                DailyTaskProcessResult.RETRYABLE_FAILURE
+            }
+
+            InsuredGoldRpcFailureType.NON_RETRYABLE -> {
                 Log.error("$TAG.collectInsuredGold.collectInsuredGold", "保障金🏥[$title]#响应失败:$detail")
+                DailyTaskProcessResult.UNKNOWN_FAILURE
+            }
         }
     }
 
@@ -1623,13 +1661,15 @@ class AntMember : ModelTask() {
                 message.contains("重复") ||
                 message.contains("已经领取") -> InsuredGoldRpcFailureType.DUPLICATE_REWARD
 
+            message.contains("稍后") ||
+                message.contains("频繁") ||
+                message.contains("繁忙") -> InsuredGoldRpcFailureType.RETRYABLE
+
             code.contains("LIMIT", ignoreCase = true) ||
                 message.contains("上限") ||
                 message.contains("限制") ||
                 message.contains("受限") ||
-                message.contains("不可领取") ||
-                message.contains("频繁") ||
-                message.contains("稍后") -> InsuredGoldRpcFailureType.BUSINESS_LIMIT
+                message.contains("不可领取") -> InsuredGoldRpcFailureType.BUSINESS_LIMIT
 
             else -> InsuredGoldRpcFailureType.NON_RETRYABLE
         }
@@ -2556,6 +2596,16 @@ class AntMember : ModelTask() {
 
     private suspend fun enableGameCenter() {
         try {
+            if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_GAME_CENTER_DONE)) {
+                Log.member("游戏中心🎮[今日已处理，跳过]")
+                return
+            }
+
+            var signInResult = DailyTaskProcessResult.UNKNOWN_FAILURE
+            var platformTaskResult = DailyTaskProcessResult.UNKNOWN_FAILURE
+            var pointBallResult = DailyTaskProcessResult.UNKNOWN_FAILURE
+            var p2eSignInResult = DailyTaskProcessResult.UNKNOWN_FAILURE
+
             // 1. 查询签到状态并尝试签到
             try {
                 val resp = AntMemberRpcCall.querySignInBall()
@@ -2568,11 +2618,15 @@ class AntMember : ModelTask() {
 
                     if (data == null || data.length() == 0) {
                         Log.member("游戏中心🎮[签到状态为空，跳过签到]")
+                        signInResult = DailyTaskProcessResult.HANDLED
                     } else {
                         val signModule = data.optJSONObject("signInBallModule")
-                        val signed = signModule != null && signModule.optBoolean("signInStatus", false)
-                        if (signed) {
+                        if (signModule == null) {
+                            Log.member("游戏中心🎮[暂无签到模块]")
+                            signInResult = DailyTaskProcessResult.HANDLED
+                        } else if (signModule.optBoolean("signInStatus", false)) {
                             Log.member("游戏中心🎮[今日已签到]")
+                            signInResult = DailyTaskProcessResult.HANDLED
                         } else {
                             val signResp = AntMemberRpcCall.continueSignIn()
                             val signJo = JSONObject(signResp)
@@ -2605,6 +2659,7 @@ class AntMember : ModelTask() {
                                         sb.append("#").append(desc)
                                     }
                                     Log.member(sb.toString())
+                                    signInResult = DailyTaskProcessResult.HANDLED
                                 } else {
                                     val sb = StringBuilder()
                                     if (!title.isEmpty()) {
@@ -2635,10 +2690,16 @@ class AntMember : ModelTask() {
                     Log.error("$TAG.enableGameCenter.tasks", "游戏中心🎮[任务列表查询失败]#$msg")
                 } else {
                     val data = root.optJSONObject("data")
-                    if (data != null) {
+                    if (data == null) {
+                        Log.member("游戏中心🎮[任务数据为空，跳过平台任务]")
+                        platformTaskResult = DailyTaskProcessResult.HANDLED
+                    } else {
                         val platformTaskModule = data.optJSONObject("gameTaskModule")
                             ?: data.optJSONObject("platformTaskModule")
-                        if (platformTaskModule != null) {
+                        if (platformTaskModule == null) {
+                            Log.member("游戏中心🎮[暂无平台任务模块]")
+                            platformTaskResult = DailyTaskProcessResult.HANDLED
+                        } else {
                             val platformTaskList = platformTaskModule.optJSONArray("gameTaskList")
                                 ?: platformTaskModule.optJSONArray("platformTaskList")
                             if (platformTaskList != null && platformTaskList.length() > 0) {
@@ -2740,12 +2801,19 @@ class AntMember : ModelTask() {
                                 if (total > 0) {
                                     Log.member("游戏中心🎮[平台任务处理完成]#待做:$total 完成:$finished 失败:$failed"
                                     )
+                                    platformTaskResult = if (failed == 0) {
+                                        DailyTaskProcessResult.HANDLED
+                                    } else {
+                                        DailyTaskProcessResult.RETRYABLE_FAILURE
+                                    }
                                 } else {
                                     Log.member("游戏中心🎮[无待处理的平台任务]"
                                     )
+                                    platformTaskResult = DailyTaskProcessResult.HANDLED
                                 }
                             } else {
                                 Log.member("游戏中心🎮[平台任务列表为空]")
+                                platformTaskResult = DailyTaskProcessResult.HANDLED
                             }
                         }
                     }
@@ -2766,6 +2834,7 @@ class AntMember : ModelTask() {
                     val pointBallList = data?.optJSONArray("pointBallList")
                     if (pointBallList == null || pointBallList.length() == 0) {
                         Log.member("游戏中心🎮[暂无可领取乐豆]")
+                        pointBallResult = DailyTaskProcessResult.HANDLED
                     } else {
                         val batchResp = AntMemberRpcCall.batchReceivePointBall()
                         val batchJo = JSONObject(batchResp)
@@ -2778,6 +2847,7 @@ class AntMember : ModelTask() {
                             } else {
                                 Log.member("游戏中心🎮[暂无可领取乐豆]")
                             }
+                            pointBallResult = DailyTaskProcessResult.HANDLED
                         } else {
                             val msg = batchJo.optString(
                                 "errorMsg", batchJo.optString("resultView", batchResp)
@@ -2794,21 +2864,30 @@ class AntMember : ModelTask() {
 
             // 4. 游戏中心赚现金签到
             try {
-                doGameCenterP2eSignIn()
+                p2eSignInResult = doGameCenterP2eSignIn()
             } catch (th: Throwable) {
                 Log.printStackTrace(TAG, "enableGameCenter.p2eSignIn err:", th)
+            }
+
+            if (listOf(
+                    signInResult,
+                    platformTaskResult,
+                    pointBallResult,
+                    p2eSignInResult
+                ).all { it == DailyTaskProcessResult.HANDLED }
+            ) {
+                setFlagToday(StatusFlags.FLAG_ANTMEMBER_GAME_CENTER_DONE)
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, t)
         }
     }
 
-    private suspend fun doGameCenterP2eSignIn() {
+    private suspend fun doGameCenterP2eSignIn(): DailyTaskProcessResult {
         val resp = AntMemberRpcCall.queryGameCenterP2eHomePage()
         val root = JSONObject(resp)
         if (!ResChecker.checkRes(TAG, root)) {
-            logGameCenterP2eFailure("赚现金签到查询", root, resp)
-            return
+            return logGameCenterP2eFailure("赚现金签到查询", root, resp)
         }
 
         val data = root.optJSONObject("data")
@@ -2820,7 +2899,7 @@ class AntMember : ModelTask() {
             } else {
                 Log.member("游戏中心🎮[赚现金暂无签到模块]")
             }
-            return
+            return DailyTaskProcessResult.HANDLED
         }
 
         val todayRecord = findGameCenterP2eTodaySignRecord(signUpModule)
@@ -2828,7 +2907,7 @@ class AntMember : ModelTask() {
         if ("SIGNED".equals(todayStatus, ignoreCase = true)) {
             val amount = todayRecord?.optString("todayGoldCoinAmount").orEmpty()
             Log.member("游戏中心🎮[赚现金今日已签到]" + if (amount.isNotBlank()) "#金币+$amount" else "")
-            return
+            return DailyTaskProcessResult.HANDLED
         }
 
         val date = signUpModule.optString("date")
@@ -2839,14 +2918,13 @@ class AntMember : ModelTask() {
                 "$TAG.enableGameCenter.p2eSignIn",
                 "游戏中心🎮[赚现金签到配置缺失]#date=$date index=$index signSequenceId=$signSequenceId"
             )
-            return
+            return DailyTaskProcessResult.UNKNOWN_FAILURE
         }
 
         val signResp = AntMemberRpcCall.gameCenterP2eSignIn(date, index, signSequenceId)
         val signObject = JSONObject(signResp)
         if (!ResChecker.checkRes(TAG, signObject)) {
-            logGameCenterP2eFailure("赚现金签到", signObject, signResp)
-            return
+            return logGameCenterP2eFailure("赚现金签到", signObject, signResp)
         }
 
         val signedRecord = findGameCenterP2eTodaySignRecord(
@@ -2856,11 +2934,13 @@ class AntMember : ModelTask() {
         val amount = signedRecord?.optString("todayGoldCoinAmount").orEmpty()
         if ("SIGNED".equals(signedStatus, ignoreCase = true) || signObject.optBoolean("success", false)) {
             Log.member("游戏中心🎮[赚现金签到成功]" + if (amount.isNotBlank()) "#金币+$amount" else "")
+            return DailyTaskProcessResult.HANDLED
         } else {
             Log.error(
                 "$TAG.enableGameCenter.p2eSignIn",
                 "游戏中心🎮[赚现金签到状态未确认]#" + buildGameCenterRpcMessage(signObject, signResp)
             )
+            return DailyTaskProcessResult.UNKNOWN_FAILURE
         }
     }
 
@@ -2883,20 +2963,32 @@ class AntMember : ModelTask() {
         return dateMatchedRecord
     }
 
-    private fun logGameCenterP2eFailure(scene: String, response: JSONObject, rawResponse: String) {
+    private fun logGameCenterP2eFailure(
+        scene: String,
+        response: JSONObject,
+        rawResponse: String
+    ): DailyTaskProcessResult {
         val message = buildGameCenterRpcMessage(response, rawResponse)
-        when {
-            isGameCenterBusinessLimited(response, message) ->
+        return when {
+            isGameCenterBusinessLimited(response, message) -> {
                 Log.member("游戏中心🎮[$scene]#业务受限，本轮跳过:$message")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            isGameCenterDuplicateOrAlreadyDone(message) ->
+            isGameCenterDuplicateOrAlreadyDone(message) -> {
                 Log.member("游戏中心🎮[$scene]#已处理过，跳过重复处理:$message")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            !response.optBoolean("retryable", true) ->
+            !response.optBoolean("retryable", true) -> {
                 Log.error("$TAG.enableGameCenter.p2eSignIn", "游戏中心🎮[$scene]#非重试失败:$message")
+                DailyTaskProcessResult.UNKNOWN_FAILURE
+            }
 
-            else ->
+            else -> {
                 Log.error("$TAG.enableGameCenter.p2eSignIn", "游戏中心🎮[$scene]#失败:$message")
+                DailyTaskProcessResult.RETRYABLE_FAILURE
+            }
         }
     }
 
@@ -2929,6 +3021,11 @@ class AntMember : ModelTask() {
 
     internal fun beanSignIn() {
         try {
+            if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_BEAN_SIGN_DONE)) {
+                Log.member("安心豆🫘[今日已处理，跳过]")
+                return
+            }
+
             try {
                 val signInProcessStr = AntMemberRpcCall.querySignInProcess("AP16242232", "INS_BLUE_BEAN_SIGN")
 
@@ -2939,7 +3036,12 @@ class AntMember : ModelTask() {
                 }
 
                 val signInResult = jo.optJSONObject("result")
-                if (signInResult?.optBoolean("canPush") == true) {
+                if (signInResult == null) {
+                    Log.error(TAG, "安心豆🫘[签到查询缺少result]#$signInProcessStr")
+                    return
+                }
+                var signInHandled = !signInResult.optBoolean("canPush", false)
+                if (signInResult.optBoolean("canPush") == true) {
                     val signInTriggerStr = AntMemberRpcCall.signInTrigger("AP16242232", "INS_BLUE_BEAN_SIGN")
 
                     jo = JSONObject(signInTriggerStr)
@@ -2950,11 +3052,15 @@ class AntMember : ModelTask() {
                         } else {
                             Log.member("安心豆🫘[$prizeName]")
                         }
+                        signInHandled = true
                     } else {
                         Log.member(jo.toString())
                     }
                 }
-                collectGuardianBeanAward()
+                val guardianAwardResult = collectGuardianBeanAward()
+                if (signInHandled && guardianAwardResult == DailyTaskProcessResult.HANDLED) {
+                    setFlagToday(StatusFlags.FLAG_ANTMEMBER_BEAN_SIGN_DONE)
+                }
             } catch (e: NullPointerException) {
                 Log.printStackTrace(TAG, "安心豆🫘[RPC桥接失败]#可能是RpcBridge未初始化", e)
             }
@@ -2974,34 +3080,40 @@ class AntMember : ModelTask() {
         return ""
     }
 
-    private fun collectGuardianBeanAward() {
+    private fun collectGuardianBeanAward(): DailyTaskProcessResult {
         try {
             val awardsResponse = AntMemberRpcCall.queryGuardianGradeAwards()
             val awardsObject = JSONObject(awardsResponse)
             if (!ResChecker.checkRes(TAG, awardsObject)) {
                 Log.member("安心豆🫘[守护者奖励查询失败]#$awardsResponse")
-                return
+                return DailyTaskProcessResult.UNKNOWN_FAILURE
+            }
+            if (awardsObject.optJSONObject("result") == null) {
+                Log.error("$TAG.collectGuardianBeanAward", "安心豆🫘[守护者奖励查询缺少result]#$awardsResponse")
+                return DailyTaskProcessResult.UNKNOWN_FAILURE
             }
             val award = findAvailableGuardianBeanAward(awardsObject)
             if (award == null) {
                 logUnavailableGuardianBeanAward(awardsObject)
-                return
+                return DailyTaskProcessResult.HANDLED
             }
             val skuId = award.optString("skuId")
             val beanQuantity = award.optInt("beanQuantity", 0)
             if (skuId.isBlank() || beanQuantity <= 0) {
                 Log.error("$TAG.collectGuardianBeanAward", "安心豆🫘[守护者奖励配置异常]#$award")
-                return
+                return DailyTaskProcessResult.UNKNOWN_FAILURE
             }
             val sendResponse = AntMemberRpcCall.guardianAwardSend(skuId)
             val sendObject = JSONObject(sendResponse)
             if (ResChecker.checkRes(TAG, sendObject)) {
                 Log.member("安心豆🫘[守护者等级奖励]#${beanQuantity}豆")
+                return DailyTaskProcessResult.HANDLED
             } else {
-                logGuardianBeanAwardSendFailure(sendObject, sendResponse)
+                return logGuardianBeanAwardSendFailure(sendObject, sendResponse)
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "collectGuardianBeanAward err:", t)
+            return DailyTaskProcessResult.UNKNOWN_FAILURE
         }
     }
 
@@ -3041,7 +3153,10 @@ class AntMember : ModelTask() {
         }
     }
 
-    private fun logGuardianBeanAwardSendFailure(responseObject: JSONObject, rawResponse: String) {
+    private fun logGuardianBeanAwardSendFailure(
+        responseObject: JSONObject,
+        rawResponse: String
+    ): DailyTaskProcessResult {
         val code = sequenceOf(
             responseObject.optString("resultCode"),
             responseObject.optString("code"),
@@ -3061,15 +3176,26 @@ class AntMember : ModelTask() {
             message.isNotBlank() -> message
             else -> rawResponse
         }
-        when (classifyGuardianBeanAwardFailure(code, message)) {
-            GuardianBeanAwardRpcFailureType.DUPLICATE_REWARD ->
+        return when (classifyGuardianBeanAwardFailure(code, message)) {
+            GuardianBeanAwardRpcFailureType.DUPLICATE_REWARD -> {
                 Log.member("安心豆🫘[守护者等级奖励]#已领取或重复领取，跳过:$detail")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            GuardianBeanAwardRpcFailureType.BUSINESS_LIMIT ->
+            GuardianBeanAwardRpcFailureType.BUSINESS_LIMIT -> {
                 Log.member("安心豆🫘[守护者等级奖励]#业务受限，本轮跳过:$detail")
+                DailyTaskProcessResult.HANDLED
+            }
 
-            GuardianBeanAwardRpcFailureType.NON_RETRYABLE ->
+            GuardianBeanAwardRpcFailureType.RETRYABLE -> {
+                Log.member("安心豆🫘[守护者等级奖励]#暂时不可领取，保留后续重试:$detail")
+                DailyTaskProcessResult.RETRYABLE_FAILURE
+            }
+
+            GuardianBeanAwardRpcFailureType.NON_RETRYABLE -> {
                 Log.error("$TAG.collectGuardianBeanAward", "安心豆🫘[守护者奖励领取失败]#$detail")
+                DailyTaskProcessResult.UNKNOWN_FAILURE
+            }
         }
     }
 
@@ -3079,13 +3205,15 @@ class AntMember : ModelTask() {
                 message.contains("重复") ||
                 message.contains("已经领取") -> GuardianBeanAwardRpcFailureType.DUPLICATE_REWARD
 
+            message.contains("稍后") ||
+                message.contains("频繁") ||
+                message.contains("繁忙") -> GuardianBeanAwardRpcFailureType.RETRYABLE
+
             code.contains("LIMIT", ignoreCase = true) ||
                 message.contains("上限") ||
                 message.contains("限制") ||
                 message.contains("受限") ||
-                message.contains("不可领取") ||
-                message.contains("频繁") ||
-                message.contains("稍后") -> GuardianBeanAwardRpcFailureType.BUSINESS_LIMIT
+                message.contains("不可领取") -> GuardianBeanAwardRpcFailureType.BUSINESS_LIMIT
 
             else -> GuardianBeanAwardRpcFailureType.NON_RETRYABLE
         }
