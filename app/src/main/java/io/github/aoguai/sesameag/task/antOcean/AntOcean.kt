@@ -467,13 +467,28 @@ class AntOcean : ModelTask() {
     }
 
     private fun isSelfCleanTask(taskType: String, taskTitle: String): Boolean {
-        return taskType == "CLEAN_RUBBISH_2_EVERY_DAY" || taskTitle.contains("清理自己垃圾")
+        val normalizedTaskType = taskType.uppercase()
+        return normalizedTaskType == "CLEAN_RUBBISH_2_EVERY_DAY" ||
+            (normalizedTaskType.contains("SELF") && normalizedTaskType.contains("CLEAN")) ||
+            (normalizedTaskType.contains("OWN") && normalizedTaskType.contains("CLEAN")) ||
+            (normalizedTaskType.contains("CLEAN_RUBBISH") &&
+                !normalizedTaskType.contains("FRIEND") &&
+                !normalizedTaskType.contains("HELP")) ||
+            taskTitle.contains("清理自己") ||
+            taskTitle.contains("自己海域") ||
+            taskTitle.contains("自己垃圾")
     }
 
     private fun isHelpFriendCleanTask(taskType: String, taskTitle: String): Boolean {
-        return taskType.contains("HELP_CLEAN") ||
+        val normalizedTaskType = taskType.uppercase()
+        return normalizedTaskType.contains("HELP_CLEAN") ||
+            normalizedTaskType.contains("FRIENDRUBBISHCLEAN") ||
+            normalizedTaskType.contains("FRIEND_RUBBISH_CLEAN") ||
+            normalizedTaskType.contains("CLEAN_FRIEND") ||
             taskTitle.contains("帮好友清理") ||
-            taskTitle.contains("帮助好友清理")
+            taskTitle.contains("帮助好友清理") ||
+            taskTitle.contains("好友清理") ||
+            (taskTitle.contains("好友") && taskTitle.contains("清理") && taskTitle.contains("垃圾"))
     }
 
     private fun isOceanActionTask(taskType: String, taskTitle: String): Boolean {
