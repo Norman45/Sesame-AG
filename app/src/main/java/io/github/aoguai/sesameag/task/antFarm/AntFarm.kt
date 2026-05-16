@@ -79,8 +79,8 @@ class AntFarm : ModelTask() {
     /**
      * 慈善评分
      */
-    private var benevolenceScore = 0.0
-    private var harvestBenevolenceScore = 0.0
+    internal var benevolenceScore = 0.0
+    internal var harvestBenevolenceScore = 0.0
 
     /**
      * 未领取的饲料奖励
@@ -215,6 +215,15 @@ class AntFarm : ModelTask() {
     internal var donation: BooleanModelField? = null
     internal var donationCount: ChoiceModelField? = null
 
+    internal var donationCompetition: BooleanModelField? = null
+    internal var receiveDonationCompetitionAward: BooleanModelField? = null
+    internal var harvestEggIfInsufficient: BooleanModelField? = null
+    internal var donationCompetitionTime: StringModelField? = null
+    internal var watchDonationRank: BooleanModelField? = null
+    internal var watchDonationAdvanceTime: IntegerModelField? = null
+    internal var watchDonationRefreshInterval: IntegerModelField? = null
+    internal var maxDailyDonationCompetitionCount: IntegerModelField? = null
+
     /**
      * 饲料任务
      */
@@ -273,7 +282,7 @@ class AntFarm : ModelTask() {
     internal var onlyQueryNewOrnaments: BooleanModelField? = null // 仅查询未兑换装扮
 
     internal var visitAnimal: BooleanModelField? = null
-    private var useSmartSchedulerManager: BooleanModelField? = null
+    internal var useSmartSchedulerManager: BooleanModelField? = null
     private var hasFence: Boolean = false       // 是否正在使用篱笆
     private var fenceCountDown: Int = 0
     // 雇佣NPC
@@ -603,6 +612,68 @@ class AntFarm : ModelTask() {
             ).withDesc("控制每日捐蛋次数。").also { donationCount = it })
         modelFields.addField(
             BooleanModelField(
+                "donationCompetition",
+                "捐蛋排行",
+                false
+            ).withDesc("执行庄园捐蛋排位赛，自动加入并按配置执行卡点反超逻辑。").also { donationCompetition = it })
+        modelFields.addField(
+            BooleanModelField(
+                "receiveDonationCompetitionAward",
+                "自动领取排位赛段位奖励",
+                true
+            ).withDesc("结算后自动领取已达成的段位奖励（如装扮币、食材）。").also {
+                receiveDonationCompetitionAward = it
+            })
+        modelFields.addField(
+            BooleanModelField(
+                "harvestEggIfInsufficient",
+                "剩余蛋数不足时收获蛋",
+                false
+            ).withDesc("在执行卡点捐蛋时，如果现有鸡蛋不足，且开启了此选项，则尝试先收取待收取的爱心蛋。").also {
+                harvestEggIfInsufficient = it
+            })
+        modelFields.addField(
+            StringModelField(
+                "donationCompetitionTime",
+                "单次蹲点捐蛋排行捐蛋时间",
+                "1958"
+            ).withDesc("设置执行卡点捐赠的时间：可以填具体时间如“1958”，或者填提前量如“2”（表示结束前2分钟）。").also {
+                donationCompetitionTime = it
+            })
+        modelFields.addField(
+            BooleanModelField(
+                "watchDonationRank",
+                "轮询蹲点排行榜",
+                false
+            ).withDesc("在排位赛结束前开启高频轮询，确保在最后时刻保持第一名。").also { watchDonationRank = it })
+        modelFields.addField(
+            IntegerModelField(
+                "watchDonationAdvanceTime",
+                "提前蹲点时间(分钟)",
+                2,
+                1,
+                10
+            ).withDesc("设置提前多久开始进入高频轮询状态。").also { watchDonationAdvanceTime = it })
+        modelFields.addField(
+            IntegerModelField(
+                "watchDonationRefreshInterval",
+                "蹲点刷新时间(秒)",
+                10,
+                1,
+                60
+            ).withDesc("高频轮询期间刷新排行榜的间隔时间。").also { watchDonationRefreshInterval = it })
+        modelFields.addField(
+            IntegerModelField(
+                "maxDailyDonationCompetitionCount",
+                "每日捐蛋总数",
+                10,
+                1,
+                20000
+            ).withDesc("设置排位赛每日允许捐赠的最大爱心蛋总数，达到上限后停止蹲点。防止排行榜过卷把蛋捐完了").also {
+                maxDailyDonationCompetitionCount = it
+            })
+        modelFields.addField(
+            BooleanModelField(
                 "useSpecialFood",
                 "使用特殊食品",
                 false
@@ -826,7 +897,8 @@ class AntFarm : ModelTask() {
     }
 
     internal fun shouldDonateEggNow(userId: String?): Boolean {
-        return donation?.value == true && Status.canDonationEgg(userId) && harvestBenevolenceScore >= 1
+        val limit = if (donationCount?.value == DonationCount.ALL) Int.MAX_VALUE else 1
+        return donation?.value == true && Status.getDonationCount(userId) < limit && harvestBenevolenceScore >= 1
     }
 
     internal fun preloadFarmTools() {
@@ -1818,8 +1890,7 @@ class AntFarm : ModelTask() {
                 }
                 lastDonationActivityIds = donatedActivityIds
                 if (isDonation && markStatusDone) {
-                    val userId = UserMap.currentUid
-                    Status.donationEgg(userId)
+                    Status.updateDonationCount(UserMap.currentUid, 1, incremental = true)
                 }
                 if (activityId == null) {
                     lastDonationNoMoreActivities = true
@@ -1836,22 +1907,34 @@ class AntFarm : ModelTask() {
         return false
     }
 
-    private fun performDonation(activityId: String?, activityName: String?): Boolean {
+    internal fun AntFarm.performDonation(
+        activityId: String?,
+        activityName: String?,
+        count: Int = 1,
+        historyCount: Int = 0
+    ): Boolean {
         try {
-            val s = AntFarmRpcCall.donation(activityId, 1)
+            val s = AntFarmRpcCall.donation(activityId, count)
             val donationResponse = JSONObject(s)
-            val memo = donationResponse.getString("memo")
             if (ResChecker.checkRes(TAG, donationResponse)) {
-                val donationDetails = donationResponse.getJSONObject("donation")
-                harvestBenevolenceScore = donationDetails.getDouble("harvestBenevolenceScore")
-                Log.farm("捐赠活动❤️[" + activityName + "]#累计捐赠" + donationDetails.getInt("donationTimesStat") + "次")
+                val donationDetails = donationResponse.optJSONObject("donation")
+                if (donationDetails != null) {
+                    harvestBenevolenceScore = donationDetails.optDouble("harvestBenevolenceScore")
+
+                    if (historyCount == 0) {
+                        Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋，首次捐赠该项目")
+                    } else {
+                        Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋，累计捐赠${historyCount + 1}次")
+                    }
+                } else {
+                    Log.farm("捐赠活动❤️[$activityName]#捐赠了${count}颗蛋")
+                }
                 return true
             } else {
-                Log.farm(memo)
-                Log.farm(s)
+                Log.farm("捐赠失败: ${donationResponse.optString("memo")}")
             }
         } catch (t: Throwable) {
-            Log.printStackTrace(t)
+            Log.printStackTrace(TAG, "performDonation err:", t)
         }
         return false
     }

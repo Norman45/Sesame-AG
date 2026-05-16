@@ -343,6 +343,10 @@ object StatusFlags {
     /** 庄园抽抽乐：限时任务今日已结束前缀 */
     const val FLAG_FARM_CHOUCHOULE_LIMITED_ENDED_PREFIX = "antFarm::chouchouleLimitedEnded::"
 
+    /** 庄园：捐蛋排位赛今日捐蛋总数*/
+    const val FLAG_FARM_DONATION_COUNT = "antFarm::donationCount|"
+
+
     /** 庄园家庭：今日签到已处理 */
     const val FLAG_FARM_FAMILY_SIGNED = "antFarm::familyDailySign"
 

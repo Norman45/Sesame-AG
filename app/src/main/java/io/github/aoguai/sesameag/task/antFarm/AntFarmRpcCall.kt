@@ -1592,5 +1592,51 @@ object AntFarmRpcCall {
         }
         return requestString("com.alipay.antfarm.syncOrnamentCoin", "[$args]")
     }
+
+
+    @JvmStatic
+    fun queryCompetitionEntranceInfo(): String {
+        val args = JSONObject().apply {
+            put("requestType", "NORMAL")
+            put("sceneCode", "ANTFARM")
+            put("source", "H5")
+            put("version", VERSION)
+        }
+        return RequestManager.requestString("com.alipay.antfarm.queryCompetitionEntranceInfo", "[$args]")
+    }
+
+    @JvmStatic
+    fun enterDonationCompetitionRank(): String {
+        val args = JSONObject().apply {
+            put("requestType", "NORMAL")
+            put("sceneCode", "ANTFARM")
+            put("source", "H5")
+            put("version", VERSION)
+        }
+        return RequestManager.requestString("com.alipay.antfarm.enterDonationCompetitionRank", "[$args]")
+    }
+
+    @JvmStatic
+    fun enterCompetitionAwardPage(): String {
+        val args = JSONObject().apply {
+            put("requestType", "NORMAL")
+            put("sceneCode", "ANTFARM")
+            put("source", "H5")
+            put("version", VERSION)
+        }
+        return RequestManager.requestString("com.alipay.antfarm.enterCompetitionAwardPage", "[$args]")
+    }
+
+    @JvmStatic
+    fun receiveDonationLevelReward(rightsId: String?): String {
+        val args = JSONObject().apply {
+            put("requestType", "NORMAL")
+            put("rightsId", rightsId ?: "")
+            put("sceneCode", "ANTFARM")
+            put("source", "H5")
+            put("version", VERSION)
+        }
+        return RequestManager.requestString("com.alipay.antfarm.receiveDonationLevelReward", "[$args]")
+    }
 }
 

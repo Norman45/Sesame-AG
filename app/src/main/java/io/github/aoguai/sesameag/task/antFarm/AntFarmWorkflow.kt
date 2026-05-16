@@ -97,7 +97,7 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
             familyDonationActivityIds = lastDonationActivityIds
         }
         if (singleDonationMode && familyDailyDonateResult.consumedDonation) {
-            Status.donationEgg(userId)
+            Status.updateDonationCount(userId, 1, incremental = true)
             skipPublicDonationThisRun = true
         }
         if (familyDailyDonateResult == AntFarmFamily.DailyDonateTaskResult.DONATED_CONFIRMED) {
@@ -131,7 +131,7 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
             Log.farm("公益捐蛋未完成，保留后续重试")
         }
     }
-    if (familyDailyDonateResult.consumedDonation && !userId.isNullOrBlank() && Status.canDonationEgg(userId)) {
+    if (familyDailyDonateResult.consumedDonation && !userId.isNullOrBlank() && Status.getDonationCount(userId) < 1) {
         val noFurtherDonationNeeded =
             if (!familyDailyDonateResult.shouldMarkDonationDone) {
                 false
@@ -141,7 +141,7 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
                     (attemptedPublicDonation && lastDonationNoMoreActivities)
             }
         if (noFurtherDonationNeeded) {
-            Status.donationEgg(userId)
+            Status.updateDonationCount(userId, 1, incremental = true)
         }
     }
 
@@ -149,6 +149,8 @@ internal suspend fun AntFarm.runFarmTaskWorkflow(tc: TimeCounter, userId: String
         receiveFarmAwards()
         tc.countDebug("收取饲料奖励")
     }
+
+    handleDonationCompetition()
 
     return pendingFarmTaskFinalization
 }
