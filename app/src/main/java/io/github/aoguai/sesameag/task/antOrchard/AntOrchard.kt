@@ -72,7 +72,7 @@ class AntOrchard : ModelTask() {
         modelFields.addField(
             ChoiceModelField(
                 "plantMode",
-                "种植模式",
+                "种植模式 | 芭芭农场",
                 PlantModeType.MAIN,
                 PlantModeType.nickNames,
                 "选择优先推进果树、摇钱树或先摇钱树后果树的混合策略。"
@@ -80,34 +80,34 @@ class AntOrchard : ModelTask() {
         )
 
         modelFields.addField(
-            IntegerModelField("executeInterval", "执行间隔(毫秒)", 500, 500, null).withDesc(
+            IntegerModelField("executeInterval", "操作间隔(毫秒)", 500, 500, null).withDesc(
                 "单次农场操作之间的等待时间，过小可能增加风控。"
             ).also { executeInterval = it }
         )
         modelFields.addField(
-            BooleanModelField("receiveSevenDayGift", "收取七日礼包", false).withDesc(
+            BooleanModelField("receiveSevenDayGift", "七日礼包 | 领取", false).withDesc(
                 "自动领取芭芭农场七日礼包奖励。"
             ).also { receiveSevenDayGift = it }
         )
         modelFields.addField(
-            BooleanModelField("receiveOrchardTaskAward", "收取农场任务奖励", false).withDesc(
+            BooleanModelField("receiveOrchardTaskAward", "农场任务 | 领奖", false).withDesc(
                 "自动领取芭芭农场任务奖励，包括肥料等常规收益。"
             ).also { receiveOrchardTaskAward = it }
         )
         // {{ 修改：添加果树和摇钱树的独立设置项 }}
         modelFields.addField(
-            IntegerModelField("orchardSpreadManureCount", "果树每日施肥次数", 0).withDesc(
+            IntegerModelField("orchardSpreadManureCount", "果树 | 每日施肥次数", 0, -1, null).withDesc(
                 "每日给果树施肥的次数；施肥可推进成熟并产出庄园食材。-1 表示施肥到当日上限。"
             ).also { orchardSpreadManureCountMain = it }
         )
         modelFields.addField(
-            IntegerModelField("orchardSpreadManureCountYeb", "摇钱树每日施肥次数", 0).withDesc(
+            IntegerModelField("orchardSpreadManureCountYeb", "摇钱树 | 每日施肥次数", 0, -1, null).withDesc(
                 "每日给摇钱树施肥的次数；0 表示不处理摇钱树，-1 表示施肥到当日上限。"
             ).also { orchardSpreadManureCountYeb = it }
         )
 
         modelFields.addField(
-            FriendSelectionModelField("assistFriendList", "助力好友列表").withDesc(
+            FriendSelectionModelField("assistFriendList", "助力 | 好友列表").withDesc(
                 "仅对选中的好友执行助力流程。"
             ).also { assistFriendList = it }
         )

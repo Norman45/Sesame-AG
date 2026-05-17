@@ -323,19 +323,19 @@ class AntSports : ModelTask() {
                 "行走路线 | 主题",
                 WalkPathTheme.DA_MEI_ZHONG_GUO,
                 WalkPathTheme.nickNames
-            ).withDesc("选择新版行走路线主题，仅在开启行走路线且未启用自定义路线时生效。").also { walkPathTheme = it }
+            ).withDesc("选择新版行走路线主题。需开启“行走路线 | 开启”，且未开启“行走路线 | 开启自定义路线”。").also { walkPathTheme = it }
         )
         modelFields.addField(
             BooleanModelField("walkCustomPath", "行走路线 | 开启自定义路线", false).withDesc(
-                "改为使用下方自定义路线代码，不再按主题自动选线。"
+                "改为使用“行走路线 | 自定义路线代码”，不再按主题自动选线。需开启“行走路线 | 开启”。"
             ).also { walkCustomPath = it }
         )
         modelFields.addField(
             StringModelField(
                 "walkCustomPathId",
-                "行走路线 | 自定义路线代码(debug)",
+                "行走路线 | 自定义路线代码",
                 "p0002023122214520001"
-            ).withDesc("自定义路线调试代码，仅在开启行走路线且启用自定义路线时生效。").also { walkCustomPathId = it }
+            ).withDesc("自定义路线代码。需开启“行走路线 | 开启”和“行走路线 | 开启自定义路线”。").also { walkCustomPathId = it }
         )
         modelFields.addField(
             StringModelField(
@@ -374,47 +374,47 @@ class AntSports : ModelTask() {
 
         // 旧版路线相关
         modelFields.addField(
-            BooleanModelField("openTreasureBox", "开启宝箱", false).withDesc(
+            BooleanModelField("openTreasureBox", "旧版路线 | 开启", false).withDesc(
                 "兼容旧版路线入口：在未开启新版行走路线时，自动处理旧版路线的加入、前进和宝箱领取。"
             ).also { openTreasureBox = it }
         )
 
         // 运动任务 & 能量球
         modelFields.addField(
-            BooleanModelField("sportsTasks", "开启运动任务", false).withDesc(
+            BooleanModelField("sportsTasks", "运动任务 | 开启", false).withDesc(
                 "执行运动任务面板中的签到、任务完成与奖励领取。"
             ).also { sportsTasksField = it }
         )
         modelFields.addField(
             BooleanModelField(
                 "sportsEnergyBubble",
-                "运动球任务(开启后有概率出现滑块验证)",
+                "运动球 | 开启",
                 false
-            ).withDesc("处理首页推荐的运动球任务，可能触发滑块验证，不包含任务面板任务。").also { sportsEnergyBubble = it }
+            ).withDesc("处理首页推荐的运动球任务，可能需要滑块验证，不包含任务面板任务。").also { sportsEnergyBubble = it }
         )
 
         // 首页金币 & 捐步
         modelFields.addField(
-            BooleanModelField("receiveCoinAsset", "收能量🎈", false).withDesc(
+            BooleanModelField("receiveCoinAsset", "能量气球 | 收取", false).withDesc(
                 "收取首页可领取的能量气球或运动币资源；关闭后不会在运动任务完成后顺带收取。"
             ).also { receiveCoinAssetField = it }
         )
         modelFields.addField(
-            BooleanModelField("donateCharityCoin", "捐能量🎈 | 开启", false).withDesc(
+            BooleanModelField("donateCharityCoin", "能量气球 | 捐赠", false).withDesc(
                 "自动把能量气球捐给公益项目。"
             ).also { donateCharityCoin = it }
         )
         modelFields.addField(
             ChoiceModelField(
                 "donateCharityCoinType",
-                "捐能量🎈 | 方式",
+                "能量气球 | 捐赠方式",
                 DonateCharityCoinType.ONE,
                 DonateCharityCoinType.nickNames
-            ).withDesc("控制只捐一个项目还是继续处理更多项目，仅在开启捐能量时生效。").also { donateCharityCoinType = it }
+            ).withDesc("控制只捐一个项目还是继续处理更多项目。需开启“能量气球 | 捐赠”。").also { donateCharityCoinType = it }
         )
         modelFields.addField(
-            IntegerModelField("donateCharityCoinAmount", "捐能量🎈 | 数量(每次)", 100).withDesc(
-                "每次捐赠的能量气球数量，仅在开启捐能量时生效。"
+            IntegerModelField("donateCharityCoinAmount", "能量气球 | 单次捐赠数量", 100, 1, 100000).withDesc(
+                "每次捐赠的能量气球数量。需开启“能量气球 | 捐赠”。"
             )
                 .also { donateCharityCoinAmount = it }
         )
@@ -464,7 +464,7 @@ class AntSports : ModelTask() {
                 "抢好友 | 动作",
                 BattleForFriendType.ROB,
                 BattleForFriendType.nickNames
-            ).withDesc("决定好友列表是“选中抢”还是“选中不抢”，仅在开启抢好友时生效。").also { battleForFriendType = it }
+            ).withDesc("决定好友列表是“选中抢”还是“选中不抢”。需开启“抢好友 | 开启”。").also { battleForFriendType = it }
         )
         modelFields.addField(
             FriendSelectionModelField(
@@ -475,23 +475,23 @@ class AntSports : ModelTask() {
 
         // 训练好友相关
         modelFields.addField(
-            BooleanModelField("trainFriend", "训练好友 | 开启", false).withDesc(
-                "在抢好友大战中自动训练空闲好友，需同时开启“抢好友”。"
+            BooleanModelField("trainFriend", "抢好友 | 训练好友", false).withDesc(
+                "在抢好友大战中自动训练空闲好友。需开启“抢好友 | 开启”。"
             ).also { trainFriend = it }
         )
         modelFields.addField(
-            IntegerModelField("zeroCoinLimit", "训练好友 | 0金币上限次数当天关闭", 5).withDesc(
-                "仅在开启训练好友时生效；连续收取 0 金币达到次数后，当天停止继续训练好友，设为 0 表示不限制。"
+            IntegerModelField("zeroCoinLimit", "抢好友 | 训练0金币止损次数", 5, 0, 100).withDesc(
+                "连续收取 0 金币达到次数后，当天停止继续训练好友，设为 0 表示不限制。需开启“抢好友 | 训练好友”。"
             )
                 .also { zeroCoinLimit = it }
         )
 
         // 文体中心 & 捐步 & 步数同步
-        modelFields.addField(BooleanModelField("tiyubiz", "文体中心", false).withDesc(
+        modelFields.addField(BooleanModelField("tiyubiz", "文体中心 | 开启", false).withDesc(
             "执行文体中心签到、任务、线路推进和走路挑战赛线上赛。"
         ).also { tiyubiz = it })
         modelFields.addField(
-            IntegerModelField("minExchangeCount", "最小捐步步数", 0).withDesc(
+            IntegerModelField("minExchangeCount", "旧版捐步 | 最小步数", 0, 0, 100000).withDesc(
                 "旧版捐步兑换的触发阈值；设为 0 关闭该流程，最晚时间前不足阈值会继续累积。"
             ).also { minExchangeCount = it }
         )
@@ -502,13 +502,13 @@ class AntSports : ModelTask() {
                 .also { earliestSyncStepTime = it }
         )
         modelFields.addField(
-            HourOfDayModelField("latestExchangeTime", "最晚捐步时间", "-1", allowDisable = true, allowDayEnd = true).withDesc(
+            HourOfDayModelField("latestExchangeTime", "旧版捐步 | 最晚时间", "-1", allowDisable = true, allowDayEnd = true).withDesc(
                 "旧版捐步兑换的最晚等待时间；支持 24:00 作为日终截止，填 -1 后不足最小捐步时不会按截止时间强制处理。"
             )
                 .also { latestExchangeTime = it }
         )
         modelFields.addField(
-            IntegerModelField("syncStepCount", "自定义同步步数", 0).withDesc(
+            IntegerModelField("syncStepCount", "同步步数 | 自定义步数", 0, 0, 100000).withDesc(
                 "在当前真实步数基础上额外增加的步数基数，运行时会随机上浮 0~1999，设为 0 关闭自定义同步。"
             ).also { syncStepCount = it }
         )

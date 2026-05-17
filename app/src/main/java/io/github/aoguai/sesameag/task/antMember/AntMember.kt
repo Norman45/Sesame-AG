@@ -193,12 +193,12 @@ class AntMember : ModelTask() {
 
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
-        modelFields.addField(BooleanModelField("memberSign", "会员签到", false).withDesc(
+        modelFields.addField(BooleanModelField("memberSign", "会员积分 | 签到", false).withDesc(
             "执行会员中心每日签到并领取会员积分。"
         ).also {
             memberSign = it
         })
-        modelFields.addField(BooleanModelField("memberTask", "会员任务", false).withDesc(
+        modelFields.addField(BooleanModelField("memberTask", "会员积分 | 任务", false).withDesc(
             "执行会员中心每日任务，完成后统一领取会员积分。"
         ).also {
             memberTask = it
@@ -209,7 +209,7 @@ class AntMember : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "memberPointExchangeBenefit", "会员积分 | 兑换权益", false
-            ).withDesc("按下方兑换列表自动尝试兑换会员权益或道具。").also { memberPointExchangeBenefit = it })
+            ).withDesc("按“会员积分 | 兑换列表”自动尝试兑换会员权益或道具。").also { memberPointExchangeBenefit = it })
         modelFields.addField(
             SelectModelField(
                 "memberPointExchangeBenefitList",
@@ -217,51 +217,51 @@ class AntMember : ModelTask() {
                 LinkedHashSet<String?>()
             ) {
                 MemberBenefit.getList()
-            }.withDesc("勾选允许自动兑换的会员权益，需同时开启上方兑换开关才会处理。").also { memberPointExchangeBenefitList = it })
+            }.withDesc("勾选允许自动兑换的会员权益。需开启“会员积分 | 兑换权益”。").also { memberPointExchangeBenefitList = it })
 
 
 
 
         modelFields.addField(
             BooleanModelField(
-                "collectInsuredGold", "蚂蚁保|保障金领取", false
+                "collectInsuredGold", "蚂蚁保 | 保障金领取", false
             ).withDesc("领取蚂蚁保页面可收取的签到保障金和活动保障金。").also { collectInsuredGold = it })
 
         // 黄金票配置
         modelFields.addField(
             BooleanModelField(
-                "enableGoldTicket", "黄金票签到", false
+                "enableGoldTicket", "黄金票 | 签到与收取", false
             ).withDesc("执行黄金票首页签到与日常收取，持续累积黄金票。").also { enableGoldTicket = it })
         modelFields.addField(
             BooleanModelField(
-                "enableGoldTicketConsume", "黄金票提取(兑换黄金)", false
+                "enableGoldTicketConsume", "黄金票 | 提取/兑换黄金", false
             ).withDesc("黄金票达到提取条件后自动兑换或提取黄金。").also { enableGoldTicketConsume = it })
-        modelFields.addField(BooleanModelField("enableGameCenter", "游戏中心签到", false).withDesc(
+        modelFields.addField(BooleanModelField("enableGameCenter", "游戏中心 | 签到", false).withDesc(
             "执行游戏中心签到、平台任务，并领取可收取的玩乐豆奖励。"
         ).also {
             enableGameCenter = it
         })
         modelFields.addField(
             BooleanModelField(
-                "merchantSign", "商家服务|签到", false
+                "merchantSign", "商家服务 | 签到", false
             ).withDesc("执行商家服务每日签到，包含可领取时会顺带处理招财金签到积分。").also { merchantSign = it })
         modelFields.addField(
             BooleanModelField(
-                "merchantKmdk", "商家服务|开门打卡", false
+                "merchantKmdk", "商家服务 | 开门打卡", false
             ).withDesc("执行商家服务开门打卡的报名与上午签到，需在可用时段内运行。").also { merchantKmdk = it })
         modelFields.addField(
             BooleanModelField(
-                "merchantMoreTask", "商家服务|积分任务", false
+                "merchantMoreTask", "商家服务 | 积分任务", false
             ).withDesc("执行商家服务积分任务，并顺带领取任务产出的积分球奖励。").also {
                 merchantMoreTask = it
             })
         modelFields.addField(
             BooleanModelField(
-                "beanSignIn", "安心豆签到", false
+                "beanSignIn", "安心豆 | 签到", false
             ).withDesc("执行安心豆每日签到，领取当天可得的安心豆奖励。").also { beanSignIn = it })
         modelFields.addField(
             BooleanModelField(
-                "beanExchangeBubbleBoost", "安心豆兑换时光加速器", false
+                "beanExchangeBubbleBoost", "安心豆 | 兑换时光加速器", false
             ).withDesc("在安心豆余额足够时自动兑换时光加速器。").also { beanExchangeBubbleBoost = it })
        /* modelFields.addField(
             BooleanModelField(
@@ -270,7 +270,7 @@ class AntMember : ModelTask() {
 
 
         modelFields.addField(
-            BooleanModelField("CollectStickers", "领取贴纸", false).withDesc(
+            BooleanModelField("CollectStickers", "账单贴纸 | 领取", false).withDesc(
                 "扫描并领取当前账单周期内可领取的贴纸奖励。"
             ).also { collectStickers = it }
         )

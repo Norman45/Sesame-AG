@@ -34,18 +34,18 @@ class AntFishPond : ModelTask() {
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
         modelFields.addField(
-            BooleanModelField("fishPondTask", "收取鱼池任务奖励", true).withDesc(
-                "自动领取福气鱼池任务奖励。"
+            BooleanModelField("fishPondTask", "鱼池任务 | 领奖", true).withDesc(
+                "自动处理福气鱼池签到、宝箱、明日钓竿和已验证任务奖励。"
             ).also { fishPondTask = it }
         )
         modelFields.addField(
-            BooleanModelField("autoFish", "自动钓鱼", true).withDesc(
-                "使用最近抓包捕获的 fishpondAngle riskToken 自动钓鱼；没有 riskToken 时只记录日志并跳过。"
+            BooleanModelField("autoFish", "自动钓鱼 | 开启", false).withDesc(
+                "开启后使用最近捕获的鱼池令牌自动钓鱼；没有令牌时提示原因并跳过。"
             ).also { autoFish = it }
         )
         modelFields.addField(
-            IntegerModelField("fishDailyLimit", "每日钓鱼次数", DEFAULT_FISH_LIMIT, 0, 200).withDesc(
-                "限制当天最多钓鱼的次数，0 表示不限制；默认保守限制为 30 次。"
+            IntegerModelField("fishDailyLimit", "自动钓鱼 | 每日次数", DEFAULT_FISH_LIMIT, 0, 200).withDesc(
+                "限制当天最多钓鱼的次数，0 表示不限制；默认限制为 30 次。需开启“自动钓鱼 | 开启”。"
             ).also { fishDailyLimit = it }
         )
         return modelFields

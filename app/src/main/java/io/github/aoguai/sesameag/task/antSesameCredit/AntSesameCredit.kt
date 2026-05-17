@@ -118,39 +118,38 @@ class AntSesameCredit : ModelTask() {
 
         modelFields.addField(
             BooleanModelField(
-                "sesameGrainExchange", "芝麻信用 | 芝麻粒兑换道具", false
+                "sesameTask", "芝麻信用 | 信用任务", false
+            ).withDesc("执行芝麻信用的涨分进度与芝麻粒相关每日任务。").also { sesameTask = it })
+        modelFields.addField(BooleanModelField("collectSesame", "芝麻粒 | 领取", false).withDesc(
+            "领取芝麻粒、阶段奖励和其他可收取的芝麻相关奖励。"
+        ).also {
+            collectSesame = it
+        })
+        modelFields.addField(
+            BooleanModelField(
+                "collectSesameWithOneClick", "芝麻粒 | 一键收取", false
+            ).withDesc("开启后优先走一键收取接口领取芝麻粒。需开启“芝麻粒 | 领取”。").also { collectSesameWithOneClick = it })
+        modelFields.addField(
+            BooleanModelField(
+                "sesameGrainExchange", "芝麻粒 | 兑换道具", false
             ).withDesc("使用芝麻粒兑换已勾选的道具，适合长期清理库存。").also { sesameGrainExchange = it })
 
         // 使用 SesameGiftMap 来存储和回显商品名称
         modelFields.addField(
             SelectModelField(
                 "sesameGrainExchangeList",
-                "芝麻信用 | 兑换列表",
+                "芝麻粒 | 兑换列表",
                 LinkedHashSet<String?>()
             ) {
                 SesameGift.getList()
-            }.withDesc("勾选允许自动兑换的芝麻粒商品，需同时开启上方兑换开关才会逐项尝试。").also { sesameGrainExchangeList = it })
-
-        modelFields.addField(
-            BooleanModelField(
-                "sesameTask", "芝麻信用|芝麻粒信用任务", false
-            ).withDesc("执行芝麻信用的涨分进度与芝麻粒相关每日任务。").also { sesameTask = it })
-        modelFields.addField(BooleanModelField("collectSesame", "芝麻信用|芝麻粒领取", false).withDesc(
-            "统一领取芝麻粒、阶段奖励和其他可收取的芝麻相关奖励。"
-        ).also {
-            collectSesame = it
-        })
-        modelFields.addField(
-            BooleanModelField(
-                "collectSesameWithOneClick", "芝麻信用|芝麻粒领取使用一键收取", false
-            ).withDesc("需同时开启芝麻粒领取，优先走一键收取接口领取芝麻粒，速度更快但依赖页面状态。").also { collectSesameWithOneClick = it })
+            }.withDesc("勾选允许自动兑换的芝麻粒商品，需开启“芝麻粒 | 兑换道具”。").also { sesameGrainExchangeList = it })
         // 芝麻炼金
         modelFields.addField(
             BooleanModelField(
-                "sesameAlchemy", "芝麻炼金", false
+                "sesameAlchemy", "芝麻炼金 | 开启", false
             ).withDesc("执行芝麻粒炼金的签到、任务和时段奖励领取。").also { sesameAlchemy = it })
         // 芝麻树
-        modelFields.addField(BooleanModelField("enableZhimaTree", "芝麻信用|芝麻树", false).withDesc(
+        modelFields.addField(BooleanModelField("enableZhimaTree", "芝麻树 | 开启", false).withDesc(
             "执行芝麻树相关签到、任务和奖励领取。"
         ).also {
             enableZhimaTree = it

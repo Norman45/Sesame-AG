@@ -20,19 +20,19 @@ data class AiTestResult(
 
 class AnswerAI : Model() {
 
-    private val aiApiKey = StringModelField("aiApiKey", "API Key", "").withDesc(
+    private val aiApiKey = StringModelField("aiApiKey", "AI服务 | API Key", "").withDesc(
         "填写所选 AI 服务的 API Key。"
     )
-    private val aiBaseUrl = StringModelField("aiBaseUrl", "BaseUrl（可选）", "").withDesc(
+    private val aiBaseUrl = StringModelField("aiBaseUrl", "AI服务 | BaseUrl（可选）", "").withDesc(
         "填写接口根地址；留空时使用所选服务与格式的官方默认地址。第三方兼容服务也在这里填写根地址。"
     )
-    private val aiModel = StringModelField("aiModel", "模型名称", "gpt-5").withDesc(
+    private val aiModel = StringModelField("aiModel", "AI服务 | 模型名称", "gpt-5").withDesc(
         "填写模型名称；请按各自平台填写对应模型。"
     )
-    private val aiMaxTokens = IntegerModelField("aiMaxTokens", "输出Token上限", 1024, 1, 8192).withDesc(
+    private val aiMaxTokens = IntegerModelField("aiMaxTokens", "AI服务 | 输出Token上限", 1024, 1, 8192).withDesc(
         "限制单次答题输出长度。Claude原生格式必须使用该值，其他格式也会尽量传递给接口。"
     )
-    private val aiTestField = EmptyModelField(FIELD_AI_TEST, "测试AI响应").withDesc(
+    private val aiTestField = EmptyModelField(FIELD_AI_TEST, "AI服务 | 测试响应").withDesc(
         "使用当前配置发起一次简单请求，确认 API Key、BaseUrl、模型和格式是否可用。"
     )
 
@@ -156,13 +156,13 @@ class AnswerAI : Model() {
         private var answerAIInterface: AnswerAIInterface? = null
         private val aiProvider = ChoiceModelField(
             "aiProvider",
-            "AI服务",
+            "AI服务 | 服务商",
             AiProvider.OPENAI.ordinal,
             AiProvider.nickNames
         ).withDesc("选择当前用于自动答题的 AI 服务。")
         private val aiApiFormat = ChoiceModelField(
             "aiApiFormat",
-            "API格式",
+            "AI服务 | API格式",
             AiFormatMode.OFFICIAL.ordinal,
             AiFormatMode.nickNames
         ).withDesc("选择官方原生格式或 OpenAI 兼容 Chat Completions 格式；实际请求格式由 AI 服务共同决定。")

@@ -47,7 +47,7 @@ class AntDodo : ModelTask() {
         val modelFields = ModelFields()
         modelFields.addField(
             BooleanModelField("collectToFriend", "帮抽卡 | 开启", false).withDesc(
-                "开启后按下面的名单规则帮好友抽神奇物种卡片。"
+                "开启后按“帮抽卡 | 动作”和“帮抽卡 | 好友列表”帮好友抽神奇物种卡片。"
             ).also { collectToFriend = it }
         )
         modelFields.addField(
@@ -69,33 +69,33 @@ class AntDodo : ModelTask() {
         modelFields.addField(
             FriendSelectionModelField(
                 "sendFriendCard",
-                "送卡片好友列表(当前图鉴所有卡片)"
+                "赠送卡片 | 好友列表"
             ).withDesc("列表不为空时，会把当前图鉴可赠送的卡片和新抽到的三星卡送给列表中的首个有效好友。").also {
                 sendFriendCard = it
             }
         )
         modelFields.addField(
-            BooleanModelField("useProp", "使用道具 | 所有", false).withDesc(
+            BooleanModelField("useProp", "道具 | 使用全部", false).withDesc(
                 "自动使用当前可消费的神奇物种道具，对所有支持的道具类型生效。"
             ).also { useProp = it }
         )
         modelFields.addField(
-            BooleanModelField("usePropCollectTimes7Days", "使用道具 | 抽卡道具", false).withDesc(
-                "单独开启后仅使用抽卡类道具；开启“使用道具 | 所有”时也会一起生效。"
+            BooleanModelField("usePropCollectTimes7Days", "道具 | 抽卡道具", false).withDesc(
+                "单独开启后仅使用抽卡类道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectTimes7Days = it }
         )
         modelFields.addField(
-            BooleanModelField("usePropCollectHistoryAnimal7Days", "使用道具 | 抽历史卡道具", false).withDesc(
-                "单独开启后仅使用历史卡抽卡道具；开启“使用道具 | 所有”时也会一起生效。"
+            BooleanModelField("usePropCollectHistoryAnimal7Days", "道具 | 抽历史卡道具", false).withDesc(
+                "单独开启后仅使用历史卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectHistoryAnimal7Days = it }
         )
         modelFields.addField(
-            BooleanModelField("usePropCollectToFriendTimes7Days", "使用道具 | 抽好友卡道具", false).withDesc(
-                "单独开启后仅使用好友卡抽卡道具；开启“使用道具 | 所有”时也会一起生效。"
+            BooleanModelField("usePropCollectToFriendTimes7Days", "道具 | 抽好友卡道具", false).withDesc(
+                "单独开启后仅使用好友卡抽卡道具；开启“道具 | 使用全部”时也会一起生效。"
             ).also { usePropCollectToFriendTimes7Days = it }
         )
         modelFields.addField(
-            BooleanModelField("autoGenerateBook", "自动合成图鉴", false).withDesc(
+            BooleanModelField("autoGenerateBook", "图鉴勋章 | 自动合成", false).withDesc(
                 "图鉴显示“已集齐”时自动合成对应勋章。"
             ).also { autoGenerateBook = it }
         )

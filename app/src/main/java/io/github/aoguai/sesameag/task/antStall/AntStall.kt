@@ -202,49 +202,49 @@ class AntStall : ModelTask() {
                     "请走小摊 | 黑名单(不超时也赶)"
                 ).withDesc("这些好友即使未超时也会被立即请走。需开启“请走小摊 | 开启”。")
                     .also { stallBlackList = it })
-            addField(BooleanModelField("stallAutoTask", "自动任务", false).withDesc(
+            addField(BooleanModelField("stallAutoTask", "新村任务 | 开启", false).withDesc(
                 "执行新村签到、可自动完成的每日任务及部分特殊任务。"
             ).also { stallAutoTask = it })
             addField(
                 BooleanModelField(
                     "stallReceiveAward",
-                    "自动领奖",
+                    "新村任务 | 领奖",
                     false
-                ).withDesc("自动领取已完成新村任务的奖励。建议配合“自动任务”一起开启。")
+                ).withDesc("自动领取已完成新村任务的奖励。建议配合“新村任务 | 开启”一起开启。")
                     .also { stallReceiveAward = it })
             addField(
-                BooleanModelField("stallDonate", "自动捐赠", false).withDesc(
+                BooleanModelField("stallDonate", "公益捐赠 | 开启", false).withDesc(
                     "金币满足条件时自动向新村公益项目捐赠。"
                 ).also { stallDonate = it }
             )
             addField(
-                BooleanModelField("roadmap", "自动进入下一村", false).withDesc(
+                BooleanModelField("roadmap", "新村进度 | 进入下一村", false).withDesc(
                     "发现可解锁的新村时自动进入打卡，每个村每天只处理一次。"
                 ).also { roadmap = it }
             )
             addField(
                 BooleanModelField(
                     "stallInviteRegister",
-                    "邀请 | 邀请好友开通新村",
+                    "新村任务 | 邀请好友开通",
                     false
-                ).withDesc("在自动任务中尝试邀请指定好友开通蚂蚁新村。需开启“自动任务”。")
+                ).withDesc("在自动任务中尝试邀请指定好友开通蚂蚁新村。需开启“新村任务 | 开启”。")
                     .also { stallInviteRegister = it })
             addField(
                 FriendSelectionModelField(
                     "stallInviteRegisterList",
-                    "邀请 | 好友列表"
-                ).withDesc("仅邀请列表中的好友开通新村。需开启“邀请 | 邀请好友开通新村”。")
+                    "新村任务 | 邀请好友列表"
+                ).withDesc("仅邀请列表中的好友开通新村。需开启“新村任务 | 邀请好友开通”。")
                     .also { stallInviteRegisterList = it })
             addField(
-                BooleanModelField("stallAssistFriend", "新村助力", false).withDesc(
-                    "按“助力好友列表”自动执行新村助力；关闭后不会发起助力。"
+                BooleanModelField("stallAssistFriend", "好友助力 | 开启", false).withDesc(
+                    "按好友助力列表自动执行新村助力；关闭后不会发起助力。"
                 ).also { stallAssistFriend = it }
             )
             addField(
                 FriendSelectionModelField(
                     "assistFriendList",
-                    "助力好友列表"
-                ).withDesc("配置允许自动新村助力的好友列表。需开启“新村助力”。")
+                    "好友助力 | 好友列表"
+                ).withDesc("配置允许自动新村助力的好友列表。需开启“好友助力 | 开启”。")
                     .also { assistFriendList = it })
         }
     }

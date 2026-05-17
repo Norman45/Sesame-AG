@@ -312,26 +312,26 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             ChoiceModelField(
                 "recallAnimalType",
-                "召回小鸡",
+                "召回小鸡 | 方式",
                 RecallAnimalType.NEVER,
                 RecallAnimalType.nickNames
             ).withDesc("控制遇到小鸡外出、偷吃或饥饿时是否主动召回。").also { recallAnimalType = it })
         modelFields.addField(
             BooleanModelField(
                 "feedAnimal",
-                "自动喂小鸡",
+                "喂小鸡 | 开启",
                 false
             ).withDesc("自动给自家小鸡喂食。").also { feedAnimal = it })
         modelFields.addField(
             BooleanModelField(
                 "doFarmTask",
-                "做饲料任务",
+                "饲料任务 | 开启",
                 false
             ).withDesc("执行庄园每日任务获取饲料、道具和抽奖机会。").also { doFarmTask = it })
         modelFields.addField(
             TimeTriggerModelField(
                 "farmTaskTrigger",
-                "饲料任务触发时间",
+                "饲料任务 | 触发时间",
                 "-1",
                 TimeTriggerParseOptions(
                     allowCheckpoints = true,
@@ -345,7 +345,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "receiveFarmTaskAward",
-                "收取饲料奖励",
+                "饲料任务 | 领奖",
                 false
             ).withDesc("自动领取已完成饲料任务的奖励。").also { receiveFarmTaskAward = it })
         modelFields.addField(
@@ -379,7 +379,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "ignoreAcceLimit",
-                "按设置的时间进行游戏改分和抽抽乐",
+                "游戏改分/抽抽乐 | 仅按时间执行",
                 false
             ).withDesc("开启后，游戏改分和抽抽乐只按设定时间执行，不再等待加速卡或游戏改分前置流程。").also {
                 ignoreAcceLimit = it
@@ -387,30 +387,34 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "enableChouchoule",
-                "开启小鸡抽抽乐",
+                "装扮抽抽乐 | 开启",
                 false
-            ).withDesc("执行庄园抽抽乐，领取抽奖次数并参与抽奖。").also { enableChouchoule = it })
+            ).withDesc("开启后执行庄园装扮抽抽乐，领取抽奖机会并参与抽奖。").also { enableChouchoule = it })
         modelFields.addField(
             BooleanModelField(
                 "autoExchange",
-                "IP抽抽乐最优兑换商店",
+                "装扮抽抽乐 | 最优兑换",
                 false
-            ).withDesc("IP 或活动抽抽乐按奖励价值从高到低自动兑换。").also { autoExchange = it })
+            ).withDesc("开启后按奖励价值从高到低自动兑换装扮抽抽乐活动商店。需开启“装扮抽抽乐 | 开启”。").also { autoExchange = it })
         modelFields.addField(
-            IntegerModelField("exchangeDaysBeforeEndIp", "IP抽抽乐|活动结束前几天开始兑换(0每日兑换)", 0, 0, 30).also { exchangeDaysBeforeEndIp = it }
+            IntegerModelField("exchangeDaysBeforeEndIp", "装扮抽抽乐 | 活动结束前兑换天数(0每天)", 0, 0, 30).withDesc(
+                "设置活动结束前多少天开始兑换；填 0 表示每天都按配置尝试兑换。需开启“装扮抽抽乐 | 最优兑换”。"
+            ).also { exchangeDaysBeforeEndIp = it }
         )
         modelFields.addField(
             SelectAndCountModelField(
                 "autoExchangeList",
-                "IP抽抽乐|自定义兑换列表(无特殊需求则不设置)",
+                "装扮抽抽乐 | 自定义兑换列表",
                 LinkedHashMap()
-            ) { AntFarmIPChouChouLeBenefit.getList() }.also {
+            ) { AntFarmIPChouChouLeBenefit.getList() }.withDesc(
+                "只兑换列表中配置的活动奖励；不配置时按最优兑换策略处理。需开启“装扮抽抽乐 | 最优兑换”。"
+            ).also {
                 autoExchangeList = it
             })
         modelFields.addField(
             TimeTriggerModelField(
                 "chouChouLeTrigger",
-                "小鸡抽抽乐触发时间",
+                "装扮抽抽乐 | 触发时间",
                 "-1",
                 TimeTriggerParseOptions(
                     allowCheckpoints = true,
@@ -424,18 +428,18 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "recordFarmGame",
-                "游戏改分(星星球、登山赛、飞行赛、揍小鸡)",
+                "庄园小游戏 | 改分",
                 false
-            ).withDesc("执行庄园小游戏改分逻辑，按预估上限刷取饲料。").also { recordFarmGame = it })
+            ).withDesc("执行星星球、登山赛、飞行赛、揍小鸡等庄园小游戏改分流程，按预估上限获取饲料。").also { recordFarmGame = it })
         modelFields.addField(
-            IntegerModelField("gameRewardMax", "游戏改分预计最大产出饲料量(g)", 180, 0, null).withDesc(
+            IntegerModelField("gameRewardMax", "庄园小游戏 | 预计最大饲料(g)", 180, 0, null).withDesc(
                 "游戏改分期望产出的最大饲料值，用于提前停止。"
             ).also { gameRewardMax = it }
         )
         modelFields.addField(
             TimeTriggerModelField(
                 "farmGameTrigger",
-                "小鸡游戏时间(范围)",
+                "庄园小游戏 | 执行时段",
                 "-1",
                 TimeTriggerParseOptions(
                     allowCheckpoints = false,
@@ -449,20 +453,20 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "enableDdrawGameCenterAward",
-                "开宝箱",
+                "小鸡乐园 | 开宝箱",
                 false
-            ).withDesc("自动领取庄园游戏中心可开启的宝箱奖励。").also { enableDdrawGameCenterAward = it })
+            ).withDesc("自动领取小鸡乐园可开启的宝箱奖励。").also { enableDdrawGameCenterAward = it })
         modelFields.addField(
             TimePointModelField(
                 "sleepTime",
-                "小鸡睡觉时间",
+                "小鸡作息 | 睡觉时间",
                 "-1",
                 true
             ).withDesc("设置自动让小鸡睡觉的时间。").also { sleepTime = it })
         modelFields.addField(
             TimePointModelField(
                 "wakeupTime",
-                "小鸡起床时间",
+                "小鸡作息 | 起床时间",
                 "-1",
                 true
             ).withDesc("设置自动让小鸡起床的时间。").also { wakeUpTime = it })
@@ -476,10 +480,10 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "rewardFriend",
-                "打赏好友",
+                "帮喂小鸡 | 打赏好友",
                 false
             ).withDesc("自动处理可打赏的好友奖励。").also { rewardFriend = it })
-        modelFields.addField(BooleanModelField("getFeed", "一起拿饲料", false).withDesc(
+        modelFields.addField(BooleanModelField("getFeed", "一起拿饲料 | 开启", false).withDesc(
             "处理“一起拿饲料”互动，可送给好友或随机送出。"
         ).also {
             getFeed = it
@@ -498,16 +502,22 @@ class AntFarm : ModelTask() {
             ).withDesc("仅对选中的好友执行一起拿饲料。").also {
                 getFeedlList = it
             })
-        modelFields.addField(BooleanModelField("acceptGift", "收麦子", false).withDesc(
+        modelFields.addField(BooleanModelField("acceptGift", "好友麦子 | 收取", false).withDesc(
             "自动收取好友赠送的麦子。"
         ).also {
             acceptGift = it
         })
         modelFields.addField(
+            BooleanModelField(
+                "visitAnimal",
+                "到访小鸡送礼 | 开启",
+                false
+            ).withDesc("处理到访小鸡送礼，并按“到访小鸡送礼 | 好友与次数”配置给好友送麦子。").also { visitAnimal = it })
+        modelFields.addField(
             FriendSelectionCountModelField(
                 "visitFriendList",
-                "送麦子好友列表"
-            ).withDesc("配置送麦子好友及每日赠送次数。需开启“到访小鸡送礼”。").also {
+                "到访小鸡送礼 | 好友与次数"
+            ).withDesc("配置送麦子好友及每日赠送次数。需开启“到访小鸡送礼 | 开启”。").also {
                 visitFriendList = it
             })
         modelFields.addField(
@@ -548,8 +558,8 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("自动遣返来偷吃或做客的小鸡。").also { sendBackAnimal = it })
         modelFields.addField(
-            IntegerModelField("timeSendBack", "投喂饲料后间隔时间赶鸡(分,<10关闭)", 0, 0, 12 * 60).withDesc(
-                "投喂后等待多少分钟再赶鸡，避免刚投喂就遣返。"
+            IntegerModelField("timeSendBack", "遣返 | 投喂后等待(分钟,<10关闭)", 0, 0, 12 * 60).withDesc(
+                "投喂后等待多少分钟再赶鸡，避免刚投喂就遣返；小于 10 分钟视为关闭。需开启“遣返 | 开启”。"
             ).also { timeSendBack = it }
         )
         modelFields.addField(
@@ -633,29 +643,29 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "donationCompetition",
-                "开启捐蛋排行赛",
+                "捐蛋排位赛 | 开启",
                 false
             ).withDesc("执行庄园捐蛋排位赛，自动加入并按配置执行卡点反超逻辑。").also { donationCompetition = it })
         modelFields.addField(
             BooleanModelField(
                 "receiveDonationCompetitionAward",
-                "自动领取排位赛段位奖励",
+                "捐蛋排位赛 | 领取我的奖励",
                 true
-            ).withDesc("结算后自动领取已达成的段位奖励（如装扮币、食材）。").also {
+            ).withDesc("每轮结算后自动领取【我的奖励】中的普通美食、装扮币和段位装扮等奖励。需开启“捐蛋排位赛 | 开启”。").also {
                 receiveDonationCompetitionAward = it
             })
         modelFields.addField(
             BooleanModelField(
                 "donationCompetitionTrySpecialFood",
-                "排位赛蛋不足时尝试特殊食品",
+                "捐蛋排位赛 | 蛋不足使用特殊食品",
                 false
-            ).withDesc("仅在排位赛补捐时生效：鸡蛋不足会尝试使用特殊食品补充产蛋进度。依赖“使用特殊食品”主开关。").also {
+            ).withDesc("仅在排位赛补捐时生效：鸡蛋不足会尝试使用特殊食品补充产蛋进度。需开启“使用特殊食品 | 开启”。").also {
                 donationCompetitionTrySpecialFood = it
             })
         modelFields.addField(
             IntegerModelField(
                 "donationCompetitionSpecialFoodCount",
-                "排位赛特殊食品每日上限",
+                "捐蛋排位赛 | 特殊食品每日上限",
                 -1,
                 -1,
                 20000
@@ -665,7 +675,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             StringModelField(
                 "donationCompetitionTime",
-                "单次蹲点捐蛋排行捐蛋时间",
+                "捐蛋排位赛 | 单次蹲点时间",
                 "1958"
             ).withDesc("设置执行卡点捐赠的时间：可以填具体时间如“1958”，或者填提前量如“2”（表示结束前2分钟）。").also {
                 donationCompetitionTime = it
@@ -673,13 +683,13 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "watchDonationRank",
-                "轮询蹲点排行榜",
+                "捐蛋排位赛 | 轮询蹲点",
                 false
             ).withDesc("在排位赛结束前开启高频轮询，确保在最后时刻保持第一名。").also { watchDonationRank = it })
         modelFields.addField(
             IntegerModelField(
                 "watchDonationAdvanceTime",
-                "提前蹲点时间(分钟)",
+                "捐蛋排位赛 | 提前蹲点时间(分钟)",
                 2,
                 1,
                 10
@@ -687,7 +697,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             IntegerModelField(
                 "watchDonationRefreshInterval",
-                "蹲点刷新时间(秒)",
+                "捐蛋排位赛 | 蹲点刷新间隔(秒)",
                 10,
                 1,
                 60
@@ -695,7 +705,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "useSpecialFood",
-                "使用特殊食品",
+                "使用特殊食品 | 开启",
                 false
             ).withDesc("自动使用特殊食物，加快爱心鸡蛋进度。").also { useSpecialFood = it })
         modelFields.addField(
@@ -711,7 +721,7 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "useNewEggCard",
-                "使用新蛋卡",
+                "新蛋卡 | 使用",
                 false
             ).withDesc("自动使用新蛋卡，切换到新的产蛋进度。").also { useNewEggCard = it })
         modelFields.addField(
@@ -740,22 +750,22 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "chickenDiary",
-                "小鸡日记",
+                "小鸡日记 | 开启",
                 false
-            ).withDesc("执行小鸡日记相关流程。开启后下面的贴贴和点赞配置才会生效。").also { chickenDiary = it })
+            ).withDesc("执行小鸡日记相关流程。开启后“小鸡日记 | 贴贴”和“小鸡日记 | 点赞”才会生效。").also { chickenDiary = it })
         modelFields.addField(
             BooleanModelField(
                 "diaryTietze",
                 "小鸡日记 | 贴贴",
                 false
-            ).withDesc("进入小鸡日记后自动执行贴贴操作。需开启“小鸡日记”。").also { diaryTietie = it })
+            ).withDesc("进入小鸡日记后自动执行贴贴操作。需开启“小鸡日记 | 开启”。").also { diaryTietie = it })
         modelFields.addField(
             ChoiceModelField(
                 "collectChickenDiary",
                 "小鸡日记 | 点赞",
                 collectChickenDiaryType.CLOSE,
                 collectChickenDiaryType.nickNames
-            ).withDesc("设置小鸡日记点赞范围：不开启、一次、当月或所有。需开启“小鸡日记”。").also {
+            ).withDesc("设置小鸡日记点赞范围：不开启、一次、当月或所有。需开启“小鸡日记 | 开启”。").also {
                 collectChickenDiary = it
             })
         modelFields.addField(
@@ -808,44 +818,38 @@ class AntFarm : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "queryOrnamentMall",
-                "查询装扮商城",
+                "装扮商城 | 开启",
                 false
             ).withDesc("自动查询装扮币商城并根据配置执行兑换。").also { queryOrnamentMall = it })
         modelFields.addField(
             ChoiceModelField(
                 "autoExchangeOrnamentLevel",
-                "自动兑换等级",
+                "装扮商城 | 自动兑换等级",
                 OrnamentLevel.NONE,
                 OrnamentLevel.nickNames
-            ).withDesc("选择自动兑换的装扮等级。需开启“查询装扮商城”。").also { autoExchangeOrnamentLevel = it })
+            ).withDesc("选择自动兑换的装扮等级。需开启“装扮商城 | 开启”。").also { autoExchangeOrnamentLevel = it })
         modelFields.addField(
             BooleanModelField(
                 "onlyQueryNewOrnaments",
-                "仅查询新的未兑换",
+                "装扮商城 | 只查询新装扮",
                 false
-            ).withDesc("开启后不执行兑换，仅查询并提示商城中未拥有的装扮。需开启“查询装扮商城”。").also {
+            ).withDesc("开启后不执行兑换，仅查询并提示商城中未拥有的装扮。需开启“装扮商城 | 开启”。").also {
                 onlyQueryNewOrnaments = it
             })
         modelFields.addField(
             BooleanModelField(
-                "visitAnimal",
-                "到访小鸡送礼",
-                false
-            ).withDesc("处理到访小鸡送礼，并按“送麦子好友列表”配置给好友送麦子。").also { visitAnimal = it })
-        modelFields.addField(
-            BooleanModelField(
                 "useSmartSchedulerManager",
-                "使用SmartSchedulerManager定时蹲点任务",
+                "蹲点任务 | 使用精细定时",
                 false
-            ).withDesc("蹲点投喂、定时赶鸡等子任务优先使用 SmartSchedulerManager 调度。").also {
+            ).withDesc("蹲点投喂、定时赶鸡等子任务优先使用精细定时调度。").also {
                 useSmartSchedulerManager = it
             })
         modelFields.addField(
             BooleanModelField(
                 "doChouChouLeDonationTask",
-                "抽抽乐捐赠任务(禁止开启)",
+                "装扮抽抽乐 | 公益捐赠任务",
                 false
-            ).withDesc("控制是否执行抽抽乐中的捐赠类任务；默认关闭以避免额外捐赠。需开启“小鸡抽抽乐”。").also {
+            ).withDesc("控制是否执行抽抽乐中的公益捐赠类任务；默认关闭以避免额外捐赠。需开启“装扮抽抽乐 | 开启”。").also {
                 doChouChouLeDonationTask = it
             })
         return modelFields

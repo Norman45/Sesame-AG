@@ -32,7 +32,7 @@ class Reserve : ModelTask() {
         modelFields.addField(
             SelectAndCountModelField(
                 "reserveList",
-                "保护地列表",
+                "保护地 | 申请列表",
                 LinkedHashMap(),
                 ReserveEntity::getListAsMapperEntity
             ).withDesc("选择要自动申请的保护地及每日申请次数；数量大于 0 才会执行，对应条目填 0 或不选则跳过。").also {

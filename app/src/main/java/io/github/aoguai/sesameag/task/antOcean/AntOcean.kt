@@ -195,7 +195,7 @@ class AntOcean : ModelTask() {
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
         modelFields.addField(
-            BooleanModelField("dailyOceanTask", "海洋任务", false).withDesc(
+            BooleanModelField("dailyOceanTask", "海洋任务 | 开启", false).withDesc(
                 "完成并领取神奇海洋每日任务奖励，为清理和合成提供碎片。"
             ).also { dailyOceanTask = it }
         )
@@ -219,19 +219,19 @@ class AntOcean : ModelTask() {
             ).withDesc("配置要参与清理规则的好友列表。").also { cleanOceanList = it }
         )
         modelFields.addField(
-            BooleanModelField("exchangeProp", "神奇海洋 | 制作万能拼图", false).withDesc(
+            BooleanModelField("exchangeProp", "万能拼图 | 制作", false).withDesc(
                 "把重复碎片制作成万能拼图。"
             ).also { exchangeProp = it }
         )
         modelFields.addField(
-            BooleanModelField("usePropByType", "神奇海洋 | 使用万能拼图", false).withDesc(
+            BooleanModelField("usePropByType", "万能拼图 | 使用", false).withDesc(
                 "在可合成目标鱼类时自动消耗万能拼图。"
             ).also { usePropByType = it }
         )
         modelFields.addField(
             ChoiceModelField(
                 "userprotectType",
-                "保护 | 类型",
+                "保护海域 | 跳过类型",
                 ProtectType.DONT_PROTECT,
                 ProtectType.nickNames
             ).withDesc("控制哪些海域或沙滩不参与自动推进。").also { userprotectType = it }
@@ -239,13 +239,13 @@ class AntOcean : ModelTask() {
         modelFields.addField(
             SelectAndCountModelField(
                 "protectOceanList",
-                "保护 | 海洋列表",
+                "保护海域 | 列表与数量",
                 LinkedHashMap(),
                 AlipayBeach::getListAsMapperEntity
             ).withDesc("配置需要保护的海域列表及对应数量配置。").also { protectOceanList = it }
         )
         modelFields.addField(
-            BooleanModelField("PDL_task", "潘多拉任务", false).withDesc(
+            BooleanModelField("PDL_task", "潘多拉任务 | 开启", false).withDesc(
                 "执行潘多拉活动系列的独立任务与奖励领取。"
             ).also { PDL_task = it }
         )

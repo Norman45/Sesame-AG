@@ -47,34 +47,34 @@ class AntCooperate : ModelTask() {
         return "AntCooperate.png"
     }
 
-    private val cooperateWater = BooleanModelField("cooperateWater", "合种浇水|开启", false).withDesc(
-        "按下面的合种列表自动浇水；未配置浇水克数的合种会跳过。"
+    private val cooperateWater = BooleanModelField("cooperateWater", "合种浇水 | 开启", false).withDesc(
+        "按“合种浇水 | 列表与单次克数”自动浇水；未配置浇水克数的合种会跳过。"
     )
     private val cooperateWaterList = SelectAndCountModelField(
         "cooperateWaterList",
-        "合种浇水列表",
+        "合种浇水 | 列表与单次克数",
         LinkedHashMap<String?, Int?>(),
         { getList() },
         "设置每个合种单次最多浇多少克；首次开启并执行一次后，返回设置页可刷新出合种列表。"
     )
     private val cooperateWaterTotalLimitList = SelectAndCountModelField(
         "cooperateWaterTotalLimitList",
-        "浇水总量限制列表",
+        "合种浇水 | 总量限制",
         LinkedHashMap<String?, Int?>(),
         { getList() },
         "限制每个合种的累计总浇水量；达到后即使当天还有额度也不再浇。"
     )
     private val cooperateSendCooperateBeckon =
-        BooleanModelField("cooperateSendCooperateBeckon", "合种 | 召唤队友浇水| 仅队长 ", false).withDesc(
-            "仅队长可用，18:00 后自动召唤还能浇水的队友；可单独开启，不依赖“合种浇水|开启”。"
+        BooleanModelField("cooperateSendCooperateBeckon", "合种 | 召唤队友浇水", false).withDesc(
+            "仅队长可用，18:00 后自动召唤还能浇水的队友；可单独开启，不依赖“合种浇水 | 开启”。"
         )
-    private val loveCooperateWater = BooleanModelField("loveCooperateWater", "真爱合种 | 浇水", false).withDesc(
+    private val loveCooperateWater = BooleanModelField("loveCooperateWater", "真爱合种 | 开启浇水", false).withDesc(
         "自动给真爱合种浇水一次。"
     )
-    private val loveCooperateWaterNum = IntegerModelField("loveCooperateWaterNum", "真爱合种 | 浇水克数(默认20g)", 20).withDesc(
-        "真爱合种每次浇水克数，需开启“真爱合种 | 浇水”。"
+    private val loveCooperateWaterNum = IntegerModelField("loveCooperateWaterNum", "真爱合种 | 单次浇水克数", 20).withDesc(
+        "真爱合种每次浇水克数，需开启“真爱合种 | 开启浇水”。"
     )
-    private val teamCooperateWaterNum = IntegerModelField("teamCooperateWaterNum", "组队合种 | 浇水克数(0为关闭，10-5000)", 0).withDesc(
+    private val teamCooperateWaterNum = IntegerModelField("teamCooperateWaterNum", "组队合种 | 每日浇水总量(0关闭)", 0, 0, 5000).withDesc(
         "组队合种每天目标浇水总量；填 0 关闭，实际会受官方剩余额度和当前能量限制。"
     )
     override fun getFields(): ModelFields {
