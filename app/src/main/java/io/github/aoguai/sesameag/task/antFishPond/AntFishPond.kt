@@ -64,13 +64,17 @@ class AntFishPond : ModelTask() {
                 handleTaskList()
             }
 
-            if (autoFish.value == true) {
+            val autoFishChanged = if (autoFish.value == true) {
                 runAutoFish()
+            } else {
+                false
             }
 
-            if (fishPondTask.value == true) {
+            if (fishPondTask.value == true && autoFishChanged) {
                 handleSubplots()
                 handleTaskList()
+            } else if (fishPondTask.value == true && autoFish.value == true) {
+                Log.fishpond("本轮未实际钓鱼，跳过钓鱼后任务刷新")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "start.run err:", t)
@@ -434,24 +438,24 @@ class AntFishPond : ModelTask() {
         return false
     }
 
-    private fun runAutoFish() {
+    private fun runAutoFish(): Boolean {
         val riskToken = loadRiskToken()
         if (riskToken.isBlank()) {
             Status.setFlagToday(StatusFlags.FLAG_ANTFISHPOND_RISK_TOKEN_MISSING)
             Log.fishpond("缺少 fishpondAngle riskToken，跳过自动钓鱼；请先手动进入鱼池钓鱼以捕获 token")
-            return
+            return false
         }
         Status.removeFlag(StatusFlags.FLAG_ANTFISHPOND_RISK_TOKEN_MISSING)
 
-        var indexJson = queryIndex(logProgress = true) ?: return
+        var indexJson = queryIndex(logProgress = true) ?: return false
         if (markExchangeReached(indexJson)) {
-            return
+            return false
         }
 
         var rodCount = extractRodCount(indexJson)
         if (rodCount <= 0) {
             Log.fishpond("当前无可用钓竿，跳过自动钓鱼")
-            return
+            return false
         }
 
         val limit = fishDailyLimit.value ?: DEFAULT_FISH_LIMIT
@@ -462,7 +466,7 @@ class AntFishPond : ModelTask() {
         if (limit > 0 && usedToday >= limit) {
             Status.setFlagToday(StatusFlags.FLAG_ANTFISHPOND_FISH_LIMIT_REACHED)
             Log.fishpond("今日自动钓鱼已达每日上限${limit}次，当前累计${usedToday}次，剩余钓竿${rodCount}根")
-            return
+            return false
         }
 
         var handledCount = 0
@@ -525,6 +529,7 @@ class AntFishPond : ModelTask() {
                 Log.fishpond("今日自动钓鱼已达每日上限${limit}次，本轮执行${handledCount}次，剩余钓竿${rodCount}根")
             }
         }
+        return handledCount > 0
     }
 
     private fun positionBigFish(bizNo: String): JSONObject? {
