@@ -1,6 +1,7 @@
 package io.github.aoguai.sesameag.task.antFarm
 
 import io.github.aoguai.sesameag.data.Status
+import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.model.BaseModel
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.antFarm.AntFarm.Companion.TAG
@@ -18,7 +19,9 @@ import org.json.JSONObject
 internal fun AntFarm.handleDonationCompetition() {
     if (donationCompetition?.value != true) return
 
-    if (receiveDonationCompetitionAward?.value == true) {
+    if (receiveDonationCompetitionAward?.value == true &&
+        !Status.hasFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED)
+    ) {
         receiveCompetitionAwards()
     }
 
@@ -129,6 +132,7 @@ private fun receiveCompetitionAwards(): Int {
         if (claimableCount == 0) {
             Log.record(TAG, "当前没有可领取的排位赛段位奖励")
         }
+        Status.setFlagToday(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED)
         return receivedCount
     } catch (e: Exception) {
         Log.printStackTrace(TAG, "receiveCompetitionAwards err:", e)
