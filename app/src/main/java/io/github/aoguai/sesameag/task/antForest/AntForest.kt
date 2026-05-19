@@ -3245,6 +3245,16 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         if (fullEnergy < limit) continue
                         rebornScanFoundProtectable.set(true)
                         val joProtect = JSONObject(AntForestRpcCall.protectBubble(safeUserId))
+                        val protectResultCode = joProtect.optString("resultCode")
+                        val protectResultDesc = joProtect.optString("resultDesc")
+                            .ifBlank { joProtect.optString("memo") }
+                        if (protectResultCode == "PROTECT_REBORN_TIRED" ||
+                            protectResultDesc.contains("复活能量次数已用完")
+                        ) {
+                            markRebornLimitReachedToday()
+                            Log.forest("复活能量今日次数已用完，已记录为当日限制")
+                            break
+                        }
                         if (!ResChecker.checkRes(TAG + "复活能量失败:", joProtect)) {
                             //Log.forest(joProtect.getString("resultDesc"))
                             //Log.runtime(joProtect.toString())

@@ -588,6 +588,9 @@ data object AntFarmFamily {
                         Status.setFlagToday(flagKey)
                         Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                         Log.farm("[$userId] 今日帮喂次数已达上限🥣，已记录为当日限制")
+                    } else if (code == "388" || memo.contains("小鸡太小")) {
+                        val maskName = UserMap.getMaskName(userId) ?: userId
+                        Log.farm("家庭任务🏠帮喂小鸡🥣[$maskName]跳过：小鸡太小，暂不能投喂")
                     } else {
                         Log.error(TAG, "喂食失败 user=$userId code=$code msg=${jo.optString("memo")}")
                     }

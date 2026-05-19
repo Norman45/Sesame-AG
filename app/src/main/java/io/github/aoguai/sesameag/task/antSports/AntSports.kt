@@ -5356,7 +5356,13 @@ class AntSports : ModelTask() {
             return try {
                 task.put("scene", "MED_TASK_HALL")
                 val res = JSONObject(AntSportsRpcCall.NeverlandRpcCall.taskSend(task))
-                if (ResChecker.checkRes(TAG, res)) {
+                val errorCode = res.optString("errorCode").ifBlank { res.optString("code") }
+                if (errorCode == "TASK_TRIGGER_ERROR") {
+                    val taskId = task.optString("id", task.optString("taskId", ""))
+                    val errorMsg = res.optString("errorMsg").ifBlank { res.optString("desc", "任务推进失败") }
+                    Log.sports("活动任务推进待确认：$title[taskId=$taskId] $errorMsg，保留下一轮刷新领奖")
+                    false
+                } else if (ResChecker.checkRes(TAG, res)) {
                     Log.sports("✔ 活动任务完成：$title")
                     true
                 } else {

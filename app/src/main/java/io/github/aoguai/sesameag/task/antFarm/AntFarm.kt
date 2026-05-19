@@ -3540,6 +3540,10 @@ class AntFarm : ModelTask() {
 
                         val masterFarmId = animalsjo.getString("masterFarmId")
                         if (masterFarmId == friendFarmId) { //遍历到的鸡 如果在自己的庄园
+                            if (animalsjo.optBoolean("littleChick", false)) {
+                                Log.farm("跳过帮喂好友🥣[${UserMap.getMaskName(userId)}]：好友的小鸡太小，暂不能投喂")
+                                break
+                            }
                             val animalStatusVO = animalsjo.getJSONObject("animalStatusVO")
                             val animalInteractStatus =
                                 animalStatusVO.getString("animalInteractStatus") //动物互动状态
@@ -3555,14 +3559,18 @@ class AntFarm : ModelTask() {
                                 }
                                 val feedFriendAnimaljo =
                                     JSONObject(AntFarmRpcCall.feedFriendAnimal(friendFarmId))
+                                val resultCode = feedFriendAnimaljo.optString("resultCode", "")
+                                val memo = feedFriendAnimaljo.optString("memo", "")
+                                if ("388" == resultCode || memo.contains("小鸡太小")) {
+                                    Log.farm("跳过帮喂好友🥣[$user]：好友的小鸡太小，暂不能投喂")
+                                    continue
+                                }
                                 if (ResChecker.checkRes(TAG, feedFriendAnimaljo)) {
                                     foodStock = feedFriendAnimaljo.getInt("foodStock")
                                     lastInsufficientFriendFeedStock = null
                                     Log.farm("帮喂好友🥣[" + user + "]的小鸡[180g]#剩余" + foodStock + "g")
                                     Status.feedFriendToday(userId)
                                 } else {
-                                    val resultCode = feedFriendAnimaljo.optString("resultCode", "")
-                                    val memo = feedFriendAnimaljo.optString("memo", "")
                                     if ("391" == resultCode || memo.contains("今日帮喂次数已达上限")) {
                                         Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                                         Log.farm("😞喂[$user]的鸡失败：今日帮喂次数已达上限，已记录为当日限制")
@@ -5757,6 +5765,12 @@ class AntFarm : ModelTask() {
                         return
                     }
                     val jo = JSONObject(AntFarmRpcCall.feedFriendAnimal(farmId, groupId))
+                    val resultCode = jo.optString("resultCode")
+                    val memo = jo.optString("memo")
+                    if ("388" == resultCode || memo.contains("小鸡太小")) {
+                        Log.farm("庄园家庭🏠帮喂好友🥣[${UserMap.getMaskName(userId)}]跳过：小鸡太小，暂不能投喂")
+                        continue
+                    }
                     if (ResChecker.checkRes(TAG, jo)) {
                         val feedFood: Int = foodStock - jo.getInt("foodStock")
                         if (feedFood > 0) {
@@ -5764,8 +5778,6 @@ class AntFarm : ModelTask() {
                         }
                         Log.farm("庄园家庭🏠帮喂好友🥣[" + UserMap.getMaskName(userId) + "]的小鸡[" + feedFood + "g]#剩余" + foodStock + "g")
                     } else {
-                        val resultCode = jo.optString("resultCode")
-                        val memo = jo.optString("memo")
                         if ("391" == resultCode || memo.contains("今日帮喂次数已达上限")) {
                             Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                             Log.farm("庄园家庭🏠帮喂好友🥣今日次数已达上限，已记录为当日限制")
