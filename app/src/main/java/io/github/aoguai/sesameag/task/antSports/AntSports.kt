@@ -16,6 +16,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.FriendSelectionModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.HourOfDayModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
+import io.github.aoguai.sesameag.task.AnswerAI.AnswerAI
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.util.*
@@ -75,6 +76,8 @@ class AntSports : ModelTask() {
 
         /** @brief 步数同步子任务 ID，用于避免同一天重复排队 */
         private const val SYNC_STEP_CHILD_TASK_ID = "syncStep"
+        private const val MOTION_DAILY_QUIZ_DONE_FLAG = "AntSports::motionDailyQuizDone"
+        private const val MOTION_DAILY_QUIZ_REWARD_TASK_ID = "QUIZ_ANSWER_ENERGY_BALL_TASK"
 
         private const val RPC_WALK_QUERY_PATH = "com.alipay.sportsplay.biz.rpc.walk.queryPath"
         private const val RPC_WALK_QUERY_USER = "com.alipay.sportsplay.biz.rpc.walk.queryUser"
@@ -122,6 +125,12 @@ class AntSports : ModelTask() {
     private data class SportsHomeRewardScanResult(
         val candidates: LinkedHashMap<String, SportsHomeRewardCandidate> = LinkedHashMap(),
         var missingRecordIdCount: Int = 0
+    )
+
+    private data class MotionQuizRewardCandidate(
+        val creativityId: String,
+        val objectId: String,
+        val title: String
     )
 
     private data class WalkChallengeGame(
@@ -577,8 +586,12 @@ class AntSports : ModelTask() {
             runStepSyncWorkflow()
 
             // 运动任务
-            if (!Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE) &&
-                sportsTasksField.value == true) {
+            if (sportsTasksField.value == true &&
+                (
+                    !Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE) ||
+                        !Status.hasFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)
+                )
+            ) {
                 sportsTasks()
             }
 
@@ -954,7 +967,17 @@ class AntSports : ModelTask() {
      */
     private fun sportsTasks() {
         try {
-            sportsCheckIn()
+            if (!Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE)) {
+                sportsTaskPanel()
+            }
+        } catch (e: Exception) {
+            Log.printStackTrace(e)
+        }
+        motionDailyQuiz()
+    }
+
+    private fun sportsTaskPanel() {
+        sportsCheckIn()
             val failedCompleteTaskIds = mutableSetOf<String>()
             val failedReceiveTaskIds = mutableSetOf<String>()
             var round = 1
@@ -1070,9 +1093,316 @@ class AntSports : ModelTask() {
             }
 
             Log.error(TAG, "运动任务面板[达到动态轮次上限$roundLimit，停止以避免重复循环]")
-        } catch (e: Exception) {
-            Log.printStackTrace(e)
+    }
+
+    private fun motionDailyQuiz() {
+        if (Status.hasFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)) {
+            return
         }
+        try {
+            val gmtStartAnswer = System.currentTimeMillis()
+            val queryResponse = JSONObject(AntSportsRpcCall.queryMotionQuizBlockDetail(gmtStartAnswer))
+            if (!ResChecker.checkRes(TAG, queryResponse)) {
+                Log.error(TAG, "运动问答查询失败 raw=$queryResponse")
+                return
+            }
+
+            val quizActivityList = findFirstJsonArrayByKey(queryResponse, "quizActivityList")
+            if (quizActivityList == null) {
+                Log.error(TAG, "运动问答查询响应缺少 quizActivityList raw=$queryResponse")
+                return
+            }
+            if (quizActivityList.length() == 0) {
+                markMotionDailyQuizDone("无可用题目")
+                return
+            }
+
+            val quiz = quizActivityList.optJSONObject(0)
+            if (quiz == null) {
+                Log.error(TAG, "运动问答题目结构异常 raw=${quizActivityList.opt(0)}")
+                return
+            }
+
+            val quizId = extractMotionQuizId(quiz)
+            val title = quiz.optString("title", "").trim()
+            val answerList = parseMotionQuizAnswerList(quiz.optJSONArray("answerList"))
+            if (quizId.isBlank() || title.isBlank() || answerList.isEmpty()) {
+                Log.error(
+                    TAG,
+                    "运动问答题目解析失败[quizId=$quizId][title=$title][answers=${answerList.size}] raw=$quiz"
+                )
+                return
+            }
+
+            when (extractMotionQuizUseRecordBizResult(quiz)) {
+                true -> {
+                    Log.sports("运动问答已答对[$title]，继续确认奖励")
+                    handleMotionQuizAward(quizId)
+                    return
+                }
+
+                false -> {
+                    markMotionDailyQuizDone("已答过但结果非正确/未命中奖励")
+                    return
+                }
+
+                null -> Unit
+            }
+
+            val answer = chooseMotionQuizAnswer(title, answerList, quiz.optString("answerResult", ""))
+            if (answer.isBlank()) {
+                Log.error(TAG, "运动问答无可提交答案[quizId=$quizId][title=$title]")
+                return
+            }
+
+            val answerResponse = JSONObject(AntSportsRpcCall.answerMotionQuiz(quizId, answer, gmtStartAnswer))
+            if (!ResChecker.checkRes(TAG, answerResponse)) {
+                Log.error(TAG, "运动问答答题失败[quizId=$quizId][answer=$answer] raw=$answerResponse")
+                return
+            }
+
+            when (extractMotionQuizUseRecordBizResult(answerResponse)) {
+                true -> {
+                    AnswerAI.rememberAnswer(title, answerList, answer, LogChannel.SPORTS.loggerName)
+                    Log.sports("运动问答答题成功[$title][$answer]")
+                    handleMotionQuizAward(quizId)
+                }
+
+                false -> {
+                    AnswerAI.removeCachedAnswer(title, LogChannel.SPORTS.loggerName)
+                    markMotionDailyQuizDone("答题结果非正确/未命中奖励")
+                }
+
+                null -> {
+                    Log.error(TAG, "运动问答答题响应缺少 useRecord.bizResult raw=$answerResponse")
+                }
+            }
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "motionDailyQuiz err:", t)
+        }
+    }
+
+    private fun markMotionDailyQuizDone(reason: String) {
+        Status.setFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)
+        Log.sports("运动问答[$reason]，今日不再重复处理")
+    }
+
+    private fun extractMotionQuizId(quiz: JSONObject): String {
+        return quiz.optString("quizId", "").trim().ifBlank {
+            quiz.optString("id", "").trim()
+        }
+    }
+
+    private fun parseMotionQuizAnswerList(answerArray: JSONArray?): List<String> {
+        if (answerArray == null) {
+            return emptyList()
+        }
+        val answers = mutableListOf<String>()
+        for (i in 0 until answerArray.length()) {
+            val answerText = when (val item = answerArray.opt(i)) {
+                is JSONObject -> extractMotionQuizAnswerText(item)
+                null -> ""
+                else -> item.toString()
+            }.trim()
+            if (answerText.isNotBlank()) {
+                answers.add(answerText)
+            }
+        }
+        return answers.distinct()
+    }
+
+    private fun extractMotionQuizAnswerText(answer: JSONObject): String {
+        return sequenceOf("answer", "content", "title", "name", "label", "value", "text")
+            .map { answer.optString(it, "").trim() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun chooseMotionQuizAnswer(title: String, answerList: List<String>, answerResult: String): String {
+        val serverAnswer = matchMotionQuizAnswer(answerResult, answerList)
+        if (serverAnswer.isNotBlank()) {
+            Log.sports("运动问答使用服务端答案[$title][$serverAnswer]")
+            return serverAnswer
+        }
+        if (answerResult.isNotBlank()) {
+            Log.error(TAG, "运动问答服务端答案未匹配选项[$title][answerResult=$answerResult][answerList=$answerList]")
+        }
+
+        val aiAnswer = AnswerAI.getAnswer(title, answerList, LogChannel.SPORTS.loggerName)
+        return matchMotionQuizAnswer(aiAnswer, answerList).ifBlank {
+            answerList.firstOrNull().orEmpty()
+        }
+    }
+
+    private fun matchMotionQuizAnswer(answer: String, answerList: List<String>): String {
+        val normalizedAnswer = normalizeMotionQuizAnswer(answer)
+        if (normalizedAnswer.isBlank()) {
+            return ""
+        }
+        return answerList.firstOrNull {
+            normalizeMotionQuizAnswer(it).equals(normalizedAnswer, ignoreCase = true)
+        }.orEmpty()
+    }
+
+    private fun normalizeMotionQuizAnswer(answer: String): String {
+        return answer.trim().replace(Regex("\\s+"), "")
+    }
+
+    private fun handleMotionQuizAward(quizId: String) {
+        try {
+            val awardResponse = JSONObject(AntSportsRpcCall.queryMotionQuizAward(quizId))
+            if (!ResChecker.checkRes(TAG, awardResponse)) {
+                Log.error(TAG, "运动问答奖励查询失败[quizId=$quizId] raw=$awardResponse")
+                return
+            }
+
+            val reward = findMotionQuizEnergyReward(awardResponse)
+            if (reward == null) {
+                markMotionDailyQuizDone("已答题但未找到可领取健康能量奖励")
+                return
+            }
+
+            val receiveResponse = JSONObject(
+                AntSportsRpcCall.clickMotionQuizReceiveSort(quizId, reward.creativityId)
+            )
+            if (ResChecker.checkRes(TAG, receiveResponse)) {
+                markMotionDailyQuizDone("奖励领取成功:${reward.title.ifBlank { reward.creativityId }}")
+                return
+            }
+
+            val errorCode = extractSportsRpcErrorCode(receiveResponse)
+            val errorMsg = extractSportsRpcErrorMessage(receiveResponse)
+            when {
+                isMotionQuizDuplicateReceive(errorCode, errorMsg) -> {
+                    markMotionDailyQuizDone("奖励已领取或重复领取")
+                }
+
+                !isSportsRpcRetryable(receiveResponse) -> {
+                    markMotionDailyQuizDone(
+                        "奖励领取非重试业务终态:${errorCode.ifEmpty { "UNKNOWN" }}-$errorMsg"
+                    )
+                }
+
+                else -> {
+                    Log.error(
+                        TAG,
+                        "运动问答奖励领取失败[quizId=$quizId][creativityId=${reward.creativityId}]" +
+                            "[code=${errorCode.ifEmpty { "UNKNOWN" }}][msg=$errorMsg] raw=$receiveResponse"
+                    )
+                }
+            }
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "handleMotionQuizAward err:", t)
+        }
+    }
+
+    private fun findMotionQuizEnergyReward(response: JSONObject): MotionQuizRewardCandidate? {
+        val medDistributeQueryRes = findFirstJsonObjectByKey(response, "medDistributeQueryRes") ?: return null
+        val spaceInfoList = medDistributeQueryRes.optJSONArray("spaceInfoList") ?: return null
+        for (i in 0 until spaceInfoList.length()) {
+            val spaceInfo = spaceInfoList.optJSONObject(i) ?: continue
+            val spaceObjectList = spaceInfo.optJSONArray("spaceObjectList") ?: continue
+            for (j in 0 until spaceObjectList.length()) {
+                val spaceObject = spaceObjectList.optJSONObject(j) ?: continue
+                val bizInfo = parseMotionQuizBizInfo(spaceObject.opt("bizInfo")) ?: continue
+                if (bizInfo.optString("taskId", "") != MOTION_DAILY_QUIZ_REWARD_TASK_ID) {
+                    continue
+                }
+
+                val objectId = spaceObject.optString("objectId", "").trim().ifBlank {
+                    spaceObject.optString("id", "").trim()
+                }
+                val creativityId = bizInfo.optString("creativeCode", "").trim().ifBlank { objectId }
+                if (creativityId.isBlank()) {
+                    Log.error(TAG, "运动问答奖励缺少 creativityId raw=$spaceObject")
+                    continue
+                }
+                val title = sequenceOf(
+                    spaceObject.optString("title", ""),
+                    spaceObject.optString("name", ""),
+                    spaceObject.optString("objectName", ""),
+                    bizInfo.optString("title", ""),
+                    bizInfo.optString("name", "")
+                ).firstOrNull { it.isNotBlank() }.orEmpty()
+                return MotionQuizRewardCandidate(creativityId, objectId, title)
+            }
+        }
+        return null
+    }
+
+    private fun parseMotionQuizBizInfo(rawBizInfo: Any?): JSONObject? {
+        return when (rawBizInfo) {
+            is JSONObject -> rawBizInfo
+            is String -> runCatching { JSONObject(rawBizInfo) }.getOrNull()
+            else -> null
+        }
+    }
+
+    private fun extractMotionQuizUseRecordBizResult(root: JSONObject): Boolean? {
+        root.optJSONObject("useRecord")?.let { useRecord ->
+            if (useRecord.has("bizResult")) {
+                return useRecord.optBoolean("bizResult", false)
+            }
+        }
+        if (root.has("bizResult")) {
+            return root.optBoolean("bizResult", false)
+        }
+        findFirstJsonObjectByKey(root, "useRecord")?.let { useRecord ->
+            if (useRecord.has("bizResult")) {
+                return useRecord.optBoolean("bizResult", false)
+            }
+        }
+        return null
+    }
+
+    private fun isMotionQuizDuplicateReceive(errorCode: String, errorMsg: String): Boolean {
+        val text = "$errorCode $errorMsg"
+        return text.contains("已领取") ||
+            text.contains("已经领取") ||
+            text.contains("重复") ||
+            text.contains("already", ignoreCase = true)
+    }
+
+    private fun findFirstJsonObjectByKey(root: JSONObject, key: String): JSONObject? {
+        val direct = root.opt(key)
+        if (direct is JSONObject) {
+            return direct
+        }
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            when (val value = root.opt(keys.next())) {
+                is JSONObject -> findFirstJsonObjectByKey(value, key)?.let { return it }
+                is JSONArray -> {
+                    for (i in 0 until value.length()) {
+                        value.optJSONObject(i)?.let { child ->
+                            findFirstJsonObjectByKey(child, key)?.let { return it }
+                        }
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findFirstJsonArrayByKey(root: JSONObject, key: String): JSONArray? {
+        val direct = root.opt(key)
+        if (direct is JSONArray) {
+            return direct
+        }
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            when (val value = root.opt(keys.next())) {
+                is JSONObject -> findFirstJsonArrayByKey(value, key)?.let { return it }
+                is JSONArray -> {
+                    for (i in 0 until value.length()) {
+                        value.optJSONObject(i)?.let { child ->
+                            findFirstJsonArrayByKey(child, key)?.let { return it }
+                        }
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun estimateSportsPanelTaskRoundLimit(taskList: JSONArray): Int {
@@ -5723,7 +6053,7 @@ class AntSports : ModelTask() {
                     val activeMap = if (selectedMap != null &&
                         selectedMap.optString("mapId", "") != mapId
                     ) {
-                        chooseMap(selectedMap, source)
+                        chooseMap(selectedMap, source, mapId)
                     } else {
                         selectedMap
                     }
@@ -6115,7 +6445,7 @@ class AntSports : ModelTask() {
                 }
                 Log.sports("健康岛选择岛屿[${selected.optString("mapName", selected.optString("mapId"))}][status=${selected.optString("status", "")}]"
                 )
-                chooseMap(selected, source)
+                chooseMap(selected, source, skipMapId)
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "chooseAvailableMap err", t)
                 null
@@ -6125,7 +6455,11 @@ class AntSports : ModelTask() {
         /**
          * @brief 切换当前地图
          */
-        private fun chooseMap(map: JSONObject, source: String = activeNeverlandSource): JSONObject? {
+        private fun chooseMap(
+            map: JSONObject,
+            source: String = activeNeverlandSource,
+            fromMapId: String? = null
+        ): JSONObject? {
             return try {
                 val mapId = map.optString("mapId")
                 val branchId = map.optString("branchId", "MASTER").ifBlank { "MASTER" }
@@ -6133,6 +6467,7 @@ class AntSports : ModelTask() {
                     AntSportsRpcCall.NeverlandRpcCall.chooseMap(branchId, mapId, source)
                 )
                 if (ResChecker.checkRes(TAG, resp)) {
+                    syncChosenMapBaseInfo(branchId, mapId, fromMapId, source)
                     Log.sports("切换地图成功: $mapId")
                     map
                 } else {
@@ -6145,6 +6480,34 @@ class AntSports : ModelTask() {
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "chooseMap err", t)
                 null
+            }
+        }
+
+        private fun syncChosenMapBaseInfo(
+            branchId: String,
+            mapId: String,
+            fromMapId: String?,
+            source: String = activeNeverlandSource
+        ) {
+            try {
+                val resp = JSONObject(
+                    AntSportsRpcCall.NeverlandRpcCall.queryBaseinfo(branchId, mapId, fromMapId, source)
+                )
+                if (!ResChecker.checkRes(TAG + " 切岛后同步基础信息失败:", resp)) {
+                    Log.error(
+                        TAG,
+                        "切岛后同步基础信息失败[mapId=$mapId][fromMapId=${fromMapId.orEmpty()}]" +
+                            "[code=${extractSportsRpcErrorCode(resp).ifEmpty { "UNKNOWN" }}]" +
+                            "[msg=${extractSportsRpcErrorMessage(resp)}] raw=$resp"
+                    )
+                    return
+                }
+                val syncedMapId = resp.optJSONObject("data")?.optString("mapId", "").orEmpty()
+                if (syncedMapId.isNotBlank() && syncedMapId != mapId) {
+                    Log.error(TAG, "切岛后基础信息仍指向[$syncedMapId]，目标地图[$mapId]")
+                }
+            } catch (t: Throwable) {
+                Log.printStackTrace(TAG, "syncChosenMapBaseInfo err", t)
             }
         }
 
