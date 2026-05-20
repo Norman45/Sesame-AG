@@ -1353,12 +1353,33 @@
             const [friendSpecDirty, setFriendSpecDirty] = useState(false);
             const [friendBatchMode, setFriendBatchMode] = useState(false);
             const [friendBatchSelectedIds, setFriendBatchSelectedIds] = useState(new Set());
+            const friendBatchSelectedIdsRef = useRef(new Set());
             const friendSheetScrollRef = useRef(null);
             const friendSummaryCacheRef = useRef({});
             const friendLongPressTimerRef = useRef(null);
             const friendLongPressTriggeredRef = useRef(false);
             const friendLongPressStartRef = useRef(null);
             const friendSheetLoadTokenRef = useRef(0);
+
+            const normalizeFriendBatchIds = (value) => {
+                const result = new Set();
+                const source = value instanceof Set || Array.isArray(value) ? value : [];
+                source.forEach(item => {
+                    const normalized = String(item || '').trim();
+                    if (normalized) result.add(normalized);
+                });
+                return result;
+            };
+
+            const updateFriendBatchSelectedIds = (nextValueOrUpdater) => {
+                const current = normalizeFriendBatchIds(friendBatchSelectedIdsRef.current);
+                const nextValue = typeof nextValueOrUpdater === 'function'
+                    ? nextValueOrUpdater(current)
+                    : nextValueOrUpdater;
+                const next = normalizeFriendBatchIds(nextValue);
+                friendBatchSelectedIdsRef.current = next;
+                setFriendBatchSelectedIds(next);
+            };
 
             // 初始化
             useEffect(() => {
@@ -1380,7 +1401,7 @@
                 friendSheetLoadTokenRef.current += 1;
                 setFriendSheetLoading(false);
                 setFriendBatchMode(false);
-                setFriendBatchSelectedIds(new Set());
+                updateFriendBatchSelectedIds(new Set());
                 if (friendLongPressTimerRef.current) {
                     window.clearTimeout(friendLongPressTimerRef.current);
                     friendLongPressTimerRef.current = null;
@@ -1392,7 +1413,7 @@
             const toggleFriendBatchSelect = (userId) => {
                 const normalizedUserId = String(userId || '').trim();
                 if (!normalizedUserId) return;
-                setFriendBatchSelectedIds(prev => {
+                updateFriendBatchSelectedIds(prev => {
                     const next = new Set(prev);
                     if (next.has(normalizedUserId)) {
                         next.delete(normalizedUserId);
@@ -1421,7 +1442,7 @@
                 friendLongPressStartRef.current = point || null;
                 friendLongPressTimerRef.current = window.setTimeout(() => {
                     setFriendBatchMode(true);
-                    setFriendBatchSelectedIds(prev => {
+                    updateFriendBatchSelectedIds(prev => {
                         const next = new Set(prev);
                         next.add(normalizedUserId);
                         return next;
@@ -1455,7 +1476,7 @@
                 friendLongPressTriggeredRef.current = false;
                 setFriendSheetLoading(false);
                 setFriendBatchMode(false);
-                setFriendBatchSelectedIds(new Set());
+                updateFriendBatchSelectedIds(new Set());
                 setFriendSheetVisible(false);
             };
 
@@ -1675,7 +1696,7 @@
                 setFriendExpandedSections({ groups: false, excludes: false, advanced: false });
                 setFriendSpecDirty(false);
                 setFriendBatchMode(false);
-                setFriendBatchSelectedIds(new Set());
+                updateFriendBatchSelectedIds(new Set());
                 setFriendSheetLoading(true);
                 setFriendSheetVisible(true);
 
@@ -1725,12 +1746,13 @@
                 const normalizedId = String(id || '').trim();
                 if (!normalizedId) return;
                 const count = Number(value);
+                const batchSelectedIds = normalizeFriendBatchIds(friendBatchSelectedIdsRef.current);
+                const targetIds = kind === 'user' && friendBatchMode && batchSelectedIds.size > 0
+                    ? Array.from(batchSelectedIds)
+                    : [normalizedId];
                 setFriendSpecDirty(true);
                 setFriendCountSpec(prev => {
                     const mapKey = kind === 'group' ? 'groupCountOverrides' : 'userCountOverrides';
-                    const targetIds = kind === 'user' && friendBatchMode && friendBatchSelectedIds.size > 0
-                        ? Array.from(friendBatchSelectedIds).map(item => String(item || '').trim()).filter(Boolean)
-                        : [normalizedId];
                     const nextOverrides = { ...(prev[mapKey] || {}) };
                     targetIds.forEach(targetId => {
                         nextOverrides[targetId] = Number.isFinite(count) ? count : 0;
@@ -1890,8 +1912,9 @@
                 const setSelectionMode = (includeKey, excludeKey, id, mode) => {
                     const normalizedId = String(id || '').trim();
                     if (!normalizedId) return;
-                    const targetIds = friendBatchMode && friendBatchSelectedIds.size > 0
-                        ? Array.from(friendBatchSelectedIds).map(item => String(item || '').trim()).filter(Boolean)
+                    const batchSelectedIds = normalizeFriendBatchIds(friendBatchSelectedIdsRef.current);
+                    const targetIds = friendBatchMode && batchSelectedIds.size > 0
+                        ? Array.from(batchSelectedIds)
                         : [normalizedId];
                     setFriendSpecDirty(true);
                     setFriendSpec(prev => {
@@ -2182,7 +2205,7 @@
                                 cancelFriendRowLongPress();
                                 setFriendBatchMode(true);
                                 friendLongPressTriggeredRef.current = true;
-                                setFriendBatchSelectedIds(prev => {
+                                updateFriendBatchSelectedIds(prev => {
                                     const next = new Set(prev);
                                     next.add(item.id);
                                     return next;
@@ -2278,10 +2301,10 @@
                             </RadioGroup>
                             {friendBatchMode ? (
                                 <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                                    <Button onClick={() => setFriendBatchSelectedIds(new Set(filteredIds))} disabled={filteredIds.length === 0}>全选</Button>
+                                    <Button onClick={() => updateFriendBatchSelectedIds(new Set(filteredIds))} disabled={filteredIds.length === 0}>全选</Button>
                                     <Button
                                         onClick={() => {
-                                            setFriendBatchSelectedIds(prev => {
+                                            updateFriendBatchSelectedIds(prev => {
                                                 const next = new Set(prev);
                                                 filteredIds.forEach(id => {
                                                     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2295,7 +2318,7 @@
                                     </Button>
                                     <Button onClick={() => {
                                         setFriendBatchMode(false);
-                                        setFriendBatchSelectedIds(new Set());
+                                        updateFriendBatchSelectedIds(new Set());
                                         friendLongPressTriggeredRef.current = false;
                                     }}>取消</Button>
                                     <Text type="tertiary">已选 {friendBatchSelectedIds.size} 人</Text>
