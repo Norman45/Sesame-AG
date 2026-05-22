@@ -184,6 +184,15 @@ class AntMember : ModelTask() {
         NON_RETRYABLE
     }
 
+    private enum class GoldTicketRpcFailureType {
+        TERMINAL_DONE,
+        BUSINESS_LIMIT,
+        UNSUPPORTED_NO_CLOSURE,
+        NON_RETRYABLE_INVALID,
+        RETRYABLE_RPC,
+        UNKNOWN_NEEDS_REVIEW
+    }
+
     private val insuredTaskCenterConfigs = listOf(
         InsuredTaskCenterConfig("AP16236844", "TASK_LIST", "GIFT_GOLD_NORMAL_TASK_CONTROL"),
         InsuredTaskCenterConfig("AP19236833", "TOP_LIST", "GIFT_GOLD_TOP_TASK_CONTROL"),
@@ -2004,7 +2013,8 @@ class AntMember : ModelTask() {
         val status = task.optString("taskProcessStatus")
         val reason = resolveUnsupportedInsuredTaskReason(taskMainType, taskType, operationType, taskCategory)
         Log.member(
-            "保障金🏥[任务中心-$title]#$reason，加入黑名单待补抓:" +
+            "保障金🏥[任务中心-$title] classification=UNSUPPORTED_NO_CLOSURE decision=BLACKLIST reason=$reason " +
+                "module=$insuredTaskBlacklistModule action=unsupportedInsuredTask rpc=<none> code=400000040 msg=未抓到稳定完成RPC " +
                 "taskId=$taskId taskMainType=$taskMainType taskType=$taskType " +
                 "operationType=$operationType category=$taskCategory status=$status"
         )
@@ -2973,6 +2983,117 @@ class AntMember : ModelTask() {
         }
     }
 
+    private fun handleGoldTicketTaskFailure(
+        source: String,
+        phase: String,
+        taskId: String,
+        title: String,
+        status: String,
+        response: JSONObject
+    ): Boolean {
+        val code = extractGoldTicketRpcCode(response)
+        val message = extractGoldTicketRpcMessage(response)
+        val rpc = when (phase) {
+            "trigger" -> "AntMemberRpcCall.goldBillTaskTrigger"
+            "push" -> "AntMemberRpcCall.taskQueryPush"
+            else -> "AntMemberRpcCall.$phase"
+        }
+        val detail = "module=$goldTicketTaskBlacklistModule taskId=$taskId taskName=$title " +
+            "source=$source status=$status action=$phase rpc=$rpc code=${code.ifBlank { "UNKNOWN" }} msg=$message raw=$response"
+        return when (classifyGoldTicketRpcFailure(response)) {
+            GoldTicketRpcFailureType.TERMINAL_DONE -> {
+                Log.member("黄金票🎫[${source}任务-$title] classification=TERMINAL_DONE decision=MARK_HANDLED $detail")
+                true
+            }
+
+            GoldTicketRpcFailureType.BUSINESS_LIMIT -> {
+                Log.member("黄金票🎫[${source}任务-$title] classification=BUSINESS_LIMIT decision=STOP_TODAY_OR_CURRENT_CHAIN $detail")
+                false
+            }
+
+            GoldTicketRpcFailureType.UNSUPPORTED_NO_CLOSURE -> {
+                blacklistClassifiedGoldTicketTask(taskId, title, code)
+                Log.error(TAG, "黄金票🎫[${source}任务-$title] classification=UNSUPPORTED_NO_CLOSURE decision=BLACKLIST reason=未抓到稳定完成RPC $detail")
+                false
+            }
+
+            GoldTicketRpcFailureType.NON_RETRYABLE_INVALID -> {
+                blacklistClassifiedGoldTicketTask(taskId, title, code)
+                Log.error(TAG, "黄金票🎫[${source}任务-$title] classification=NON_RETRYABLE_INVALID decision=BLACKLIST $detail")
+                false
+            }
+
+            GoldTicketRpcFailureType.RETRYABLE_RPC -> {
+                Log.error(TAG, "黄金票🎫[${source}任务-$title] classification=RETRYABLE_RPC decision=RETRY_LATER $detail")
+                false
+            }
+
+            GoldTicketRpcFailureType.UNKNOWN_NEEDS_REVIEW -> {
+                Log.error(TAG, "黄金票🎫[${source}任务-$title] classification=UNKNOWN_NEEDS_REVIEW decision=LOG_ONLY $detail")
+                false
+            }
+        }
+    }
+
+    private fun blacklistClassifiedGoldTicketTask(taskId: String, title: String, code: String) {
+        if (code.isNotBlank()) {
+            TaskBlacklist.autoAddToBlacklist(goldTicketTaskBlacklistModule, taskId, title, code)
+        }
+        TaskBlacklist.addToBlacklist(goldTicketTaskBlacklistModule, taskId, title)
+    }
+
+    private fun classifyGoldTicketRpcFailure(response: JSONObject): GoldTicketRpcFailureType {
+        val code = extractGoldTicketRpcCode(response)
+        val message = extractGoldTicketRpcMessage(response)
+        return when {
+            containsAny(message, "已领取", "已经领取", "重复领取", "重复领奖", "重复完成", "已完成", "任务已完结", "任务已结束") ->
+                GoldTicketRpcFailureType.TERMINAL_DONE
+
+            code in setOf("104", "PROMISE_HAS_PROCESSING_TEMPLATE", "CAMP_TRIGGER_ERROR") ||
+                code.contains("LIMIT", ignoreCase = true) ||
+                containsAny(message, "上限", "限制", "受限", "不可领取", "资格不足", "兑完", "风控", "风险", "模板处理中") ->
+                GoldTicketRpcFailureType.BUSINESS_LIMIT
+
+            code == "400000040" ||
+                containsAny(message, "不支持rpc调用", "不支持RPC完成") ->
+                GoldTicketRpcFailureType.UNSUPPORTED_NO_CLOSURE
+
+            code in setOf("20020012", "TASK_ID_INVALID", "ILLEGAL_ARGUMENT", "PROMISE_TEMPLATE_NOT_EXIST") ||
+                containsAny(message, "参数错误", "任务ID非法", "模板不存在", "生活记录模板不存在") ->
+                GoldTicketRpcFailureType.NON_RETRYABLE_INVALID
+
+            code in setOf("3000", "REMOTE_INVOKE_EXCEPTION", "OP_REPEAT_CHECK", "SYSTEM_BUSY", "NETWORK_ERROR") ||
+                containsAny(message, "系统出错", "系统繁忙", "稍后", "繁忙", "频繁", "重试") ||
+                isGoldTicketMarkedRetryable(response) ->
+                GoldTicketRpcFailureType.RETRYABLE_RPC
+
+            else -> GoldTicketRpcFailureType.UNKNOWN_NEEDS_REVIEW
+        }
+    }
+
+    private fun extractGoldTicketRpcCode(response: JSONObject): String {
+        return response.optString("resultCode")
+            .ifBlank { response.optString("errorCode") }
+            .ifBlank { response.optString("code") }
+            .ifBlank { response.optString("errCode") }
+    }
+
+    private fun extractGoldTicketRpcMessage(response: JSONObject): String {
+        return response.optString("resultDesc")
+            .ifBlank { response.optString("memo") }
+            .ifBlank { response.optString("desc") }
+            .ifBlank { response.optString("errorMsg") }
+            .ifBlank { response.optString("errorMessage") }
+            .ifBlank { response.optString("resultView") }
+            .ifBlank { response.toString() }
+    }
+
+    private fun isGoldTicketMarkedRetryable(response: JSONObject): Boolean {
+        return listOf("retryable", "retriable", "canRetry").any { key ->
+            response.has(key) && response.optBoolean(key, false)
+        }
+    }
+
     private fun tryReceiveGoldTicketTask(task: JSONObject, source: String = "首页"): Boolean {
         val taskId = task.optString("taskId")
         if (taskId.isBlank()) {
@@ -2995,15 +3116,14 @@ class AntMember : ModelTask() {
                 val triggerRes = AntMemberRpcCall.goldBillTaskTrigger(taskId) ?: return false
                 val triggerJson = JSONObject(triggerRes)
                 if (!ResChecker.checkRes(TAG, triggerJson)) {
-                    val triggerCode = triggerJson.optString("resultCode", triggerJson.optString("errorCode", ""))
-                    val triggerDesc = triggerJson.optString("resultDesc", triggerJson.optString("memo"))
-                    if (triggerCode.isNotBlank()) {
-                        TaskBlacklist.autoAddToBlacklist(goldTicketTaskBlacklistModule, taskId, title, triggerCode)
-                    }
-                    if (triggerDesc.isNotBlank()) {
-                        Log.error("黄金票🎫[${source}任务领取失败] $title#$taskId#$status#$triggerDesc")
-                    }
-                    return false
+                    return handleGoldTicketTaskFailure(
+                        source = source,
+                        phase = "trigger",
+                        taskId = taskId,
+                        title = title,
+                        status = status,
+                        response = triggerJson
+                    )
                 }
             }
 
@@ -3014,15 +3134,14 @@ class AntMember : ModelTask() {
             }
             val pushJson = JSONObject(pushRes)
             if (!ResChecker.checkRes(TAG, pushJson)) {
-                val pushCode = pushJson.optString("resultCode", pushJson.optString("errorCode", ""))
-                val pushDesc = pushJson.optString("resultDesc", pushJson.optString("memo"))
-                if (pushCode.isNotBlank()) {
-                    TaskBlacklist.autoAddToBlacklist(goldTicketTaskBlacklistModule, taskId, title, pushCode)
-                }
-                if (pushDesc.isNotBlank()) {
-                    Log.member("黄金票🎫[${source}任务推送提示] $title#$taskId#$status#$pushDesc")
-                }
-                return false
+                return handleGoldTicketTaskFailure(
+                    source = source,
+                    phase = "push",
+                    taskId = taskId,
+                    title = title,
+                    status = status,
+                    response = pushJson
+                )
             }
             val pushDone = pushJson.optJSONObject("result")
                 ?.optJSONObject("pushResult")

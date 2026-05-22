@@ -71,6 +71,16 @@ import kotlin.math.min
 class AntFarm : ModelTask() {
     internal var ownerFarmId: String? = null
     private val farmTaskBlacklistModule = "蚂蚁庄园"
+
+    private enum class FarmRpcFailureType {
+        TERMINAL_DONE,
+        BUSINESS_LIMIT,
+        UNSUPPORTED_NO_CLOSURE,
+        NON_RETRYABLE_INVALID,
+        RETRYABLE_RPC,
+        UNKNOWN_NEEDS_REVIEW
+    }
+
     private var animals: Array<Animal>? = null
     private var ownerAnimal = Animal()
     private var rewardProductNum: String? = null
@@ -2728,6 +2738,62 @@ class AntFarm : ModelTask() {
             message.contains("当日上限")
     }
 
+    private fun extractFarmRpcErrorCode(jo: JSONObject): String {
+        return jo.optString("resultCode")
+            .ifBlank { jo.optString("errorCode") }
+            .ifBlank { jo.optString("code") }
+    }
+
+    private fun extractFarmRpcMessage(jo: JSONObject): String {
+        return jo.optString("memo")
+            .ifBlank { jo.optString("resultDesc") }
+            .ifBlank { jo.optString("desc") }
+            .ifBlank { jo.optString("errorMsg") }
+            .ifBlank { jo.optString("resultMsg") }
+            .ifBlank { jo.toString() }
+    }
+
+    private fun classifyFarmRpcFailure(jo: JSONObject): FarmRpcFailureType {
+        val code = extractFarmRpcErrorCode(jo)
+        val message = extractFarmRpcMessage(jo)
+        return when {
+            containsAny(message, "已领取", "已经领取", "重复领取", "重复领奖", "重复完成", "已完成", "任务已完结", "任务已结束") ->
+                FarmRpcFailureType.TERMINAL_DONE
+
+            code == "331" ||
+                isFarmTaskQuotaReachedResponse(jo) ||
+                code == "CAMP_TRIGGER_ERROR" ||
+                code.contains("LIMIT", ignoreCase = true) ||
+                containsAny(message, "上限", "限制", "受限", "不可领取", "资格不足", "饲料槽已满", "兑完", "风控", "风险") ->
+                FarmRpcFailureType.BUSINESS_LIMIT
+
+            code == "400000040" ||
+                containsAny(message, "不支持rpc调用", "不支持RPC完成") ->
+                FarmRpcFailureType.UNSUPPORTED_NO_CLOSURE
+
+            code in setOf("20020012", "TASK_ID_INVALID", "ILLEGAL_ARGUMENT", "PROMISE_TEMPLATE_NOT_EXIST") ||
+                containsAny(message, "参数错误", "任务ID非法", "模板不存在") ->
+                FarmRpcFailureType.NON_RETRYABLE_INVALID
+
+            code in setOf("3000", "REMOTE_INVOKE_EXCEPTION", "OP_REPEAT_CHECK") ||
+                containsAny(message, "系统出错", "系统繁忙", "稍后", "繁忙", "频繁", "重试") ||
+                isFarmMarkedRetryable(jo) ->
+                FarmRpcFailureType.RETRYABLE_RPC
+
+            else -> FarmRpcFailureType.UNKNOWN_NEEDS_REVIEW
+        }
+    }
+
+    private fun isFarmMarkedRetryable(jo: JSONObject): Boolean {
+        return listOf("retryable", "retriable", "canRetry").any { key ->
+            jo.has(key) && jo.optBoolean(key, false)
+        }
+    }
+
+    private fun containsAny(text: String, vararg keywords: String): Boolean {
+        return keywords.any { keyword -> text.contains(keyword, ignoreCase = true) }
+    }
+
     // 抽取通用任务处理逻辑
     private fun handleGeneralTask(bizKey: String, title: String, silent: Boolean = false) {
         val result = AntFarmRpcCall.doFarmTask(bizKey)
@@ -2743,10 +2809,40 @@ class AntFarm : ModelTask() {
         if (ResChecker.checkRes(TAG, jo)) {
             if (!silent) Log.farm("庄园任务完成🧾[$title]")
         } else {
-            val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
-            Log.error("庄园任务失败：$title code:$resultCode")
-            TaskBlacklist.autoAddToBlacklist(farmTaskBlacklistModule, bizKey, title, resultCode)
+            val resultCode = extractFarmRpcErrorCode(jo)
+            val message = extractFarmRpcMessage(jo)
+            val detail = "module=$farmTaskBlacklistModule taskId=$bizKey taskName=$title " +
+                "action=doFarmTask rpc=AntFarmRpcCall.doFarmTask code=${resultCode.ifBlank { "UNKNOWN" }} msg=$message raw=$jo"
+            when (classifyFarmRpcFailure(jo)) {
+                FarmRpcFailureType.TERMINAL_DONE -> {
+                    Log.farm("庄园任务[$title] classification=TERMINAL_DONE decision=MARK_HANDLED $detail")
+                }
+                FarmRpcFailureType.BUSINESS_LIMIT -> {
+                    Log.farm("庄园任务[$title] classification=BUSINESS_LIMIT decision=STOP_TODAY_OR_CURRENT_CHAIN $detail")
+                }
+                FarmRpcFailureType.UNSUPPORTED_NO_CLOSURE -> {
+                    blacklistClassifiedFarmTask(bizKey, title, resultCode)
+                    Log.error(TAG, "庄园任务[$title] classification=UNSUPPORTED_NO_CLOSURE decision=BLACKLIST reason=未抓到稳定完成RPC $detail")
+                }
+                FarmRpcFailureType.NON_RETRYABLE_INVALID -> {
+                    blacklistClassifiedFarmTask(bizKey, title, resultCode)
+                    Log.error(TAG, "庄园任务[$title] classification=NON_RETRYABLE_INVALID decision=BLACKLIST $detail")
+                }
+                FarmRpcFailureType.RETRYABLE_RPC -> {
+                    Log.error(TAG, "庄园任务[$title] classification=RETRYABLE_RPC decision=RETRY_LATER $detail")
+                }
+                FarmRpcFailureType.UNKNOWN_NEEDS_REVIEW -> {
+                    Log.error(TAG, "庄园任务[$title] classification=UNKNOWN_NEEDS_REVIEW decision=LOG_ONLY $detail")
+                }
+            }
         }
+    }
+
+    private fun blacklistClassifiedFarmTask(taskId: String, title: String, errorCode: String) {
+        if (errorCode.isNotBlank()) {
+            TaskBlacklist.autoAddToBlacklist(farmTaskBlacklistModule, taskId, title, errorCode)
+        }
+        TaskBlacklist.addToBlacklist(farmTaskBlacklistModule, taskId, title)
     }
 
     internal suspend fun receiveFarmAwards() {
@@ -2823,7 +2919,7 @@ class AntFarm : ModelTask() {
                     }
 
                     var lastSkippedAwardCount = -1
-                    for (i in unreceivedTasks.indices) {
+                    awardLoop@ for (i in unreceivedTasks.indices) {
                         val task = unreceivedTasks[i]
                         val awardCount = task.optInt("awardCount", 0)
                         val taskTitle = task.optString("title", "未知任务")
@@ -2901,15 +2997,45 @@ class AntFarm : ModelTask() {
                         }
                         else {
                             // 捕获饲料槽已满（331），设置满槽标记并停止后续领取
-                            val resultCode = receiveTaskAwardjo.optString("resultCode", "")
-                            val memo = receiveTaskAwardjo.optString("memo", "")
-                            if ("331" == resultCode || memo.contains("饲料槽已满")) {
-                                Log.farm("领取失败：饲料槽已满，停止后续领取")
-                                unreceiveTaskAward += (unreceivedTasks.size - i)
-                                isFeedFull = true
-                                break
-                            } else {
-                                Log.error(TAG, "领取庄园任务奖励失败：$receiveTaskAwardjo")
+                            val resultCode = extractFarmRpcErrorCode(receiveTaskAwardjo)
+                            val memo = extractFarmRpcMessage(receiveTaskAwardjo)
+                            val detail = "module=$farmTaskBlacklistModule taskId=$taskId taskName=$taskTitle " +
+                                "action=receiveAward rpc=AntFarmRpcCall.receiveFarmTaskAward " +
+                                "code=${resultCode.ifBlank { "UNKNOWN" }} msg=$memo raw=$receiveTaskAwardjo"
+                            when (classifyFarmRpcFailure(receiveTaskAwardjo)) {
+                                FarmRpcFailureType.TERMINAL_DONE -> {
+                                    Log.farm("庄园任务[$taskTitle] classification=TERMINAL_DONE decision=MARK_HANDLED $detail")
+                                    doubleCheck = true
+                                    if (unreceiveTaskAward > 0) unreceiveTaskAward--
+                                }
+                                FarmRpcFailureType.BUSINESS_LIMIT -> {
+                                    Log.farm("庄园任务[$taskTitle] classification=BUSINESS_LIMIT decision=STOP_TODAY_OR_CURRENT_CHAIN $detail")
+                                    unreceiveTaskAward += (unreceivedTasks.size - i)
+                                    isFeedFull = true
+                                    break@awardLoop
+                                }
+                                FarmRpcFailureType.UNSUPPORTED_NO_CLOSURE -> {
+                                    blacklistClassifiedFarmTask(taskId, taskTitle, resultCode)
+                                    Log.error(TAG, "庄园任务[$taskTitle] classification=UNSUPPORTED_NO_CLOSURE decision=BLACKLIST reason=未抓到稳定领奖闭环 $detail")
+                                    unreceiveTaskAward += (unreceivedTasks.size - i)
+                                    break@awardLoop
+                                }
+                                FarmRpcFailureType.NON_RETRYABLE_INVALID -> {
+                                    blacklistClassifiedFarmTask(taskId, taskTitle, resultCode)
+                                    Log.error(TAG, "庄园任务[$taskTitle] classification=NON_RETRYABLE_INVALID decision=BLACKLIST $detail")
+                                    unreceiveTaskAward += (unreceivedTasks.size - i)
+                                    break@awardLoop
+                                }
+                                FarmRpcFailureType.RETRYABLE_RPC -> {
+                                    Log.error(TAG, "庄园任务[$taskTitle] classification=RETRYABLE_RPC decision=RETRY_LATER $detail")
+                                    unreceiveTaskAward += (unreceivedTasks.size - i)
+                                    break@awardLoop
+                                }
+                                FarmRpcFailureType.UNKNOWN_NEEDS_REVIEW -> {
+                                    Log.error(TAG, "庄园任务[$taskTitle] classification=UNKNOWN_NEEDS_REVIEW decision=LOG_ONLY $detail")
+                                    unreceiveTaskAward += (unreceivedTasks.size - i)
+                                    break@awardLoop
+                                }
                             }
                         }
                     }

@@ -99,6 +99,16 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private val taskCount = AtomicInteger(0)
     private val isEnergyLoopRunning = AtomicBoolean(false)
     private val forestTaskBlacklistModule = "蚂蚁森林"
+
+    private enum class ForestTaskFailureType {
+        TERMINAL_DONE,
+        BUSINESS_LIMIT,
+        UNSUPPORTED_NO_CLOSURE,
+        NON_RETRYABLE_INVALID,
+        RETRYABLE_RPC,
+        UNKNOWN_NEEDS_REVIEW
+    }
+
     private var selfId: String? = null
 
     @Volatile
@@ -4065,6 +4075,125 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             desc.contains("无状态转换处理")
     }
 
+    private fun handleForestTaskRpcFailure(
+        action: String,
+        sceneCode: String,
+        taskType: String,
+        taskTitle: String,
+        response: JSONObject,
+        tryKey: String? = null,
+        terminalResult: Boolean = true
+    ): Boolean {
+        val code = extractForestTaskFailureCode(response)
+        val message = extractForestTaskFailureMessage(response)
+        val rpc = if (action.contains("receive", ignoreCase = true)) {
+            "AntForestRpcCall.receiveTaskAward"
+        } else {
+            "AntForestRpcCall.finishTask"
+        }
+        val detail = "module=$forestTaskBlacklistModule taskId=$taskType taskType=$taskType taskName=$taskTitle " +
+            "sceneCode=$sceneCode action=$action rpc=$rpc code=${code.ifBlank { "UNKNOWN" }} msg=$message raw=$response"
+        return when (classifyForestTaskFailure(response)) {
+            ForestTaskFailureType.TERMINAL_DONE -> {
+                tryKey?.let(forestTaskTryCount::remove)
+                Log.forest("森林任务[$taskTitle] classification=TERMINAL_DONE decision=MARK_HANDLED $detail")
+                terminalResult
+            }
+
+            ForestTaskFailureType.BUSINESS_LIMIT -> {
+                Log.forest("森林任务[$taskTitle] classification=BUSINESS_LIMIT decision=STOP_TODAY_OR_CURRENT_CHAIN $detail")
+                false
+            }
+
+            ForestTaskFailureType.UNSUPPORTED_NO_CLOSURE -> {
+                blacklistClassifiedForestTask(taskType, taskTitle, code)
+                tryKey?.let(forestTaskTryCount::remove)
+                Log.error(TAG, "森林任务[$taskTitle] classification=UNSUPPORTED_NO_CLOSURE decision=BLACKLIST reason=未抓到稳定完成RPC $detail")
+                false
+            }
+
+            ForestTaskFailureType.NON_RETRYABLE_INVALID -> {
+                blacklistClassifiedForestTask(taskType, taskTitle, code)
+                tryKey?.let(forestTaskTryCount::remove)
+                Log.error(TAG, "森林任务[$taskTitle] classification=NON_RETRYABLE_INVALID decision=BLACKLIST $detail")
+                false
+            }
+
+            ForestTaskFailureType.RETRYABLE_RPC -> {
+                Log.error(TAG, "森林任务[$taskTitle] classification=RETRYABLE_RPC decision=RETRY_LATER $detail")
+                false
+            }
+
+            ForestTaskFailureType.UNKNOWN_NEEDS_REVIEW -> {
+                Log.error(TAG, "森林任务[$taskTitle] classification=UNKNOWN_NEEDS_REVIEW decision=LOG_ONLY $detail")
+                false
+            }
+        }
+    }
+
+    private fun blacklistClassifiedForestTask(taskType: String, taskTitle: String, code: String) {
+        if (code.isNotBlank()) {
+            TaskBlacklist.autoAddToBlacklist(forestTaskBlacklistModule, taskType, taskTitle, code)
+        }
+        TaskBlacklist.addToBlacklist(forestTaskBlacklistModule, taskType, taskTitle)
+    }
+
+    private fun classifyForestTaskFailure(response: JSONObject): ForestTaskFailureType {
+        val code = extractForestTaskFailureCode(response)
+        val message = extractForestTaskFailureMessage(response)
+        return when {
+            isForestTaskAlreadyHandled(response) ||
+                containsAnyForest(message, "已领取", "已经领取", "重复领取", "重复领奖", "重复完成", "已完成", "任务已完结", "任务已结束") ->
+                ForestTaskFailureType.TERMINAL_DONE
+
+            code == "CAMP_TRIGGER_ERROR" ||
+                code.contains("LIMIT", ignoreCase = true) ||
+                containsAnyForest(message, "上限", "限制", "受限", "不可领取", "资格不足", "兑完", "风控", "风险") ->
+                ForestTaskFailureType.BUSINESS_LIMIT
+
+            code == "400000040" ||
+                containsAnyForest(message, "不支持rpc调用", "不支持RPC完成") ->
+                ForestTaskFailureType.UNSUPPORTED_NO_CLOSURE
+
+            code in setOf("20020012", "TASK_ID_INVALID", "ILLEGAL_ARGUMENT", "PROMISE_TEMPLATE_NOT_EXIST") ||
+                containsAnyForest(message, "参数错误", "任务ID非法", "模板不存在") ->
+                ForestTaskFailureType.NON_RETRYABLE_INVALID
+
+            code in setOf("3000", "REMOTE_INVOKE_EXCEPTION", "OP_REPEAT_CHECK") ||
+                containsAnyForest(message, "系统出错", "系统繁忙", "稍后", "繁忙", "频繁", "重试") ||
+                isForestFailureMarkedRetryable(response) ->
+                ForestTaskFailureType.RETRYABLE_RPC
+
+            else -> ForestTaskFailureType.UNKNOWN_NEEDS_REVIEW
+        }
+    }
+
+    private fun extractForestTaskFailureCode(response: JSONObject): String {
+        return response.optString("code")
+            .ifBlank { response.optString("resultCode") }
+            .ifBlank { response.optString("errorCode") }
+    }
+
+    private fun extractForestTaskFailureMessage(response: JSONObject): String {
+        return response.optString("desc")
+            .ifBlank { response.optString("resultDesc") }
+            .ifBlank { response.optString("resultView") }
+            .ifBlank { response.optString("errorMsg") }
+            .ifBlank { response.optString("errorMessage") }
+            .ifBlank { response.optString("memo") }
+            .ifBlank { response.toString() }
+    }
+
+    private fun isForestFailureMarkedRetryable(response: JSONObject): Boolean {
+        return listOf("retryable", "retriable", "canRetry").any { key ->
+            response.has(key) && response.optBoolean(key, false)
+        }
+    }
+
+    private fun containsAnyForest(text: String, vararg keywords: String): Boolean {
+        return keywords.any { keyword -> text.contains(keyword, ignoreCase = true) }
+    }
+
     private data class DeferredForestRightsTask(
         val sceneCode: String,
         val taskType: String,
@@ -4166,9 +4295,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             }
 
             val bizKey = "${childSceneCode}_$childTaskType"
-            val count = forestTaskTryCount
-                .computeIfAbsent(bizKey) { AtomicInteger(0) }
-                .incrementAndGet()
+            forestTaskTryCount.computeIfAbsent(bizKey) { AtomicInteger(0) }.incrementAndGet()
             val finishTaskResponse = JSONObject(AntForestRpcCall.finishTask(childSceneCode, childTaskType))
             when {
                 isForestTaskAlreadyHandled(finishTaskResponse) -> {
@@ -4186,22 +4313,18 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
 
                 else -> {
-                    val errorCode = finishTaskResponse.optString("code")
-                        .ifBlank { finishTaskResponse.optString("resultCode") }
-                    TaskBlacklist.autoAddToBlacklist(
-                        forestTaskBlacklistModule,
-                        childTaskType,
-                        childTaskTitle,
-                        errorCode
-                    )
-                    if (count > 1) {
-                        TaskBlacklist.addToBlacklist(forestTaskBlacklistModule, childTaskType, childTaskTitle)
+                    if (handleForestTaskRpcFailure(
+                            action = "finishGreenPracticeChildTask",
+                            sceneCode = childSceneCode,
+                            taskType = childTaskType,
+                            taskTitle = childTaskTitle,
+                            response = finishTaskResponse,
+                            tryKey = bizKey
+                        )
+                    ) {
+                        changed = true
+                        finishedCount++
                     }
-                    val errorMessage = finishTaskResponse.optString(
-                        "desc",
-                        finishTaskResponse.optString("resultDesc", "未知错误")
-                    )
-                    Log.forest("绿色践行子任务失败[$childTaskTitle]: $errorMessage")
                 }
             }
         }
@@ -4418,13 +4541,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             Log.forest("游戏任务完成 🎮️[$taskTitle]# $awardCount 活力值")
             true
         } else {
-            TaskBlacklist.autoAddToBlacklist(
-                forestTaskBlacklistModule,
-                taskType,
-                taskTitle,
-                finishTaskResponse.optString("code", "")
+            handleForestTaskRpcFailure(
+                action = "finishLegacyGameTask",
+                sceneCode = sceneCode,
+                taskType = taskType,
+                taskTitle = taskTitle,
+                response = finishTaskResponse
             )
-            false
         }
     }
 
@@ -4476,9 +4599,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             }
 
             else -> {
-                Log.error(TAG, "领取失败: $taskTitle")
-                Log.forest(awardResponse.toString())
-                false
+                handleForestTaskRpcFailure(
+                    action = "receiveTaskAward",
+                    sceneCode = sceneCode,
+                    taskType = taskType,
+                    taskTitle = taskTitle,
+                    response = awardResponse,
+                    terminalResult = false
+                )
             }
         }
     }
@@ -4603,9 +4731,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     }
 
                     else -> {
-                        Log.error(TAG, "领取失败: $taskTitle")
-                        Log.forest(awardResponse.toString())
-                        false
+                        handleForestTaskRpcFailure(
+                            action = "receiveTaskAward",
+                            sceneCode = sceneCode,
+                            taskType = taskType,
+                            taskTitle = taskTitle,
+                            response = awardResponse,
+                            terminalResult = false
+                        )
                     }
                 }
             }
@@ -4624,9 +4757,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     return handleLegacyForestGameTask(sceneCode, taskType, taskTitle, awardCount, bizInfo)
                 }
                 val bizKey = "${sceneCode}_$taskType"
-                val count = forestTaskTryCount
-                    .computeIfAbsent(bizKey) { AtomicInteger(0) }
-                    .incrementAndGet()
+                forestTaskTryCount.computeIfAbsent(bizKey) { AtomicInteger(0) }.incrementAndGet()
                 val finishTaskResponse = JSONObject(AntForestRpcCall.finishTask(sceneCode, taskType))
                 when {
                     isForestTaskAlreadyHandled(finishTaskResponse) -> {
@@ -4642,12 +4773,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     }
 
                     else -> {
-                        val errorCode = finishTaskResponse.optString("code", "")
-                        TaskBlacklist.autoAddToBlacklist(forestTaskBlacklistModule, taskType, taskTitle, errorCode)
-                        if (count > 1) {
-                            TaskBlacklist.addToBlacklist(forestTaskBlacklistModule, taskType, taskTitle)
-                        }
-                        false
+                        handleForestTaskRpcFailure(
+                            action = "finishTask",
+                            sceneCode = sceneCode,
+                            taskType = taskType,
+                            taskTitle = taskTitle,
+                            response = finishTaskResponse,
+                            tryKey = bizKey
+                        )
                     }
                 }
             }
