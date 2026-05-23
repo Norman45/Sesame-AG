@@ -2604,16 +2604,6 @@ class AntSesameCredit : ModelTask() {
                     continue
                 }
 
-                var recordId = task.optString("recordId", "")
-                if (recordId.isEmpty() && joinLimitReached) {
-                    if (!joinLimitLogged) {
-                        Log.sesame("芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
-                        joinLimitLogged = true
-                    }
-                    skippedCount++
-                    continue
-                }
-
                 if (isSesameTaskInBlacklist(sesameCreditTaskBlacklistModule, task, taskTitle)) {
                     Log.sesame("芝麻信用💳[跳过黑名单任务]#$taskTitle")
                     skippedCount++
@@ -2633,6 +2623,16 @@ class AntSesameCredit : ModelTask() {
                     } else {
                         skippedCount++
                     }
+                    continue
+                }
+
+                var recordId = task.optString("recordId", "")
+                if (recordId.isEmpty() && joinLimitReached) {
+                    if (!joinLimitLogged) {
+                        Log.sesame("芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
+                        joinLimitLogged = true
+                    }
+                    skippedCount++
                     continue
                 }
 
