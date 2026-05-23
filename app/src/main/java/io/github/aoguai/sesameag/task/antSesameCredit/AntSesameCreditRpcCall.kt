@@ -18,6 +18,10 @@ object AntSesameCreditRpcCall {
         "com.antgroup.zmxy.zmcustprod.biz.rpc.home.creditaccumulate.api.CreditAccumulateRpcManager.queryCreditFeedback"
     private const val METHOD_COLLECT_CREDIT_FEEDBACK =
         "com.antgroup.zmxy.zmcustprod.biz.rpc.home.creditaccumulate.api.CreditAccumulateRpcManager.collectCreditFeedback"
+    private const val METHOD_QUERY_LAST_OPERATE_TASK =
+        "com.antgroup.zmxy.zmmemberop.biz.rpc.creditaccumulate.CreditAccumulateStrategyRpcManager.queryLastOperateTask"
+    private const val METHOD_ALCHEMY_QUERY_HOME =
+        "com.antgroup.zmxy.zmmemberop.biz.rpc.AlchemyRpcManager.queryHome"
 
     internal fun isRpcSuccess(raw: String): Boolean {
         return try {
@@ -49,6 +53,18 @@ object AntSesameCreditRpcCall {
         }
     }
 
+    private fun invalidateLastOperateTaskCacheIfSuccess(raw: String) {
+        if (isRpcSuccess(raw)) {
+            RpcCache.invalidate(METHOD_QUERY_LAST_OPERATE_TASK)
+        }
+    }
+
+    private fun invalidateAlchemyHomeCacheIfSuccess(raw: String) {
+        if (isRpcSuccess(raw)) {
+            RpcCache.invalidate(METHOD_ALCHEMY_QUERY_HOME)
+        }
+    }
+
     @JvmStatic
     fun taskFinish(bizId: String, includeExtendInfo: Boolean = false): String {
         val args = JSONObject().apply {
@@ -62,6 +78,7 @@ object AntSesameCreditRpcCall {
             JSONArray().put(args).toString()
         )
         invalidateCreditAccumulateTaskListCacheIfSuccess(resp)
+        invalidateLastOperateTaskCacheIfSuccess(resp)
         return resp
     }
 
@@ -190,6 +207,8 @@ object AntSesameCreditRpcCall {
             """[{"adTaskBizId":"$adTaskBizId"}]"""
         )
         invalidateCreditAccumulateTaskListCacheIfSuccess(resp)
+        invalidateLastOperateTaskCacheIfSuccess(resp)
+        invalidateAlchemyHomeCacheIfSuccess(resp)
         return resp
     }
 
@@ -253,7 +272,7 @@ object AntSesameCreditRpcCall {
     @JvmStatic
     fun queryLastOperateTask(version: String = SESAME_TASK_VERSION): String {
         return RequestManager.requestString(
-            "com.antgroup.zmxy.zmmemberop.biz.rpc.creditaccumulate.CreditAccumulateStrategyRpcManager.queryLastOperateTask",
+            METHOD_QUERY_LAST_OPERATE_TASK,
             """[{"version":"$version"}]"""
         )
     }
@@ -539,17 +558,19 @@ object AntSesameCreditRpcCall {
             @JvmStatic
             fun alchemyQueryHome(): String {
                 return RequestManager.requestString(
-                    "com.antgroup.zmxy.zmmemberop.biz.rpc.AlchemyRpcManager.queryHome",
+                    METHOD_ALCHEMY_QUERY_HOME,
                     "[{}]"
                 )
             }
 
             @JvmStatic
             fun alchemyExecute(): String {
-                return RequestManager.requestString(
+                val resp = RequestManager.requestString(
                     "com.antgroup.zmxy.zmmemberop.biz.rpc.AlchemyRpcManager.alchemy",
                     "[null]"
                 )
+                invalidateAlchemyHomeCacheIfSuccess(resp)
+                return resp
             }
 
             @JvmStatic
