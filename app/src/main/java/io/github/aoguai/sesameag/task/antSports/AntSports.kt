@@ -3,9 +3,12 @@ package io.github.aoguai.sesameag.task.antSports
 import android.annotation.SuppressLint
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
+import io.github.aoguai.sesameag.entity.SportsEnergyExchange
 import io.github.aoguai.sesameag.entity.friend.FriendCapabilityState
 import io.github.aoguai.sesameag.hook.ApplicationHook
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.ExchangeOptionsRefreshBridge
+import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.model.BaseModel
 import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.ModelGroup
@@ -15,13 +18,20 @@ import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.FriendSelectionModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.HourOfDayModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.task.AnswerAI.AnswerAI
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
+import io.github.aoguai.sesameag.task.exchange.ExchangeCost
+import io.github.aoguai.sesameag.task.exchange.ExchangeItem
+import io.github.aoguai.sesameag.task.exchange.ExchangeLimit
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafety
 import io.github.aoguai.sesameag.util.*
 import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.friend.FriendCapabilityRecorder
+import io.github.aoguai.sesameag.util.maps.IdMapManager
+import io.github.aoguai.sesameag.util.maps.SportsEnergyExchangeMap
 import io.github.aoguai.sesameag.util.maps.UserMap
 import org.json.JSONArray
 import org.json.JSONObject
@@ -112,6 +122,7 @@ class AntSports : ModelTask() {
         private const val NEVERLAND_SOURCE_SPORT_HOME = "ch_toufang__yundongshouye"
         private const val NEVERLAND_SOURCE_LEGACY = "jkdsportcard"
         private val NEVERLAND_SOURCE_CANDIDATES = listOf(NEVERLAND_SOURCE_SPORT_HOME, NEVERLAND_SOURCE_LEGACY)
+        private const val SPORT_ITEM_MALL_CITY_CODE = "440100"
 
     }
 
@@ -195,6 +206,14 @@ class AntSports : ModelTask() {
         val name: String,
         val status: String,
         val prizeStatus: String
+    )
+
+    private data class SportsEnergyExchangeCandidate(
+        val item: ExchangeItem,
+        val benefitId: String,
+        val itemId: String,
+        val materialType: String,
+        val cityCode: String
     )
 
     private data class RouteConfig(
@@ -293,6 +312,8 @@ class AntSports : ModelTask() {
     private lateinit var originBossIdList: FriendSelectionModelField
     private lateinit var sportsTasksField: BooleanModelField
     private lateinit var sportsEnergyBubble: BooleanModelField
+    private lateinit var sportsEnergyExchange: BooleanModelField
+    private lateinit var sportsEnergyExchangeList: SelectModelField
 
     // 训练好友相关配置
     internal lateinit var trainFriend: BooleanModelField
@@ -409,6 +430,23 @@ class AntSports : ModelTask() {
                 "运动球 | 开启",
                 false
             ).withDesc("处理首页推荐的运动球任务，可能需要滑块验证，不包含任务面板任务。").also { sportsEnergyBubble = it }
+        )
+        modelFields.addField(
+            BooleanModelField(
+                "sportsEnergyExchange",
+                "运动 | 能量兑换",
+                false
+            ).withDesc("刷新“运动 | 能量兑换列表”；仅纯能量虚拟权益自动兑换，实付/商品/下单链路只提醒。").also { sportsEnergyExchange = it }
+        )
+        modelFields.addField(
+            SelectModelField(
+                "sportsEnergyExchangeList",
+                "运动 | 能量兑换列表",
+                LinkedHashSet<String?>()
+            ) {
+                refreshSportsEnergyExchangeOptionsForSettings()
+                SportsEnergyExchange.getList()
+            }.withDesc("勾选允许处理的运动能量兑换项，需开启“运动 | 能量兑换”。").also { sportsEnergyExchangeList = it }
         )
 
         // 首页金币 & 捐步
@@ -609,6 +647,10 @@ class AntSports : ModelTask() {
                 sportsEnergyBubbleTask()
             }
 
+            if (sportsEnergyExchange.value == true) {
+                sportsEnergyExchange()
+            }
+
             runRouteWorkflow(loader)
 
             // 文体中心
@@ -628,6 +670,303 @@ class AntSports : ModelTask() {
         } finally {
             Log.sports("执行结束-${getName()}")
         }
+    }
+
+    private fun refreshSportsEnergyExchangeOptionsForSettings(): List<SportsEnergyExchangeCandidate> {
+        if (!HookReadyChecker.isCurrentProcessReadyForRpc(UserMap.currentUid)) {
+            if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid) ||
+                !ExchangeOptionsRefreshBridge.requestRefresh(
+                    ExchangeOptionsRefreshBridge.TARGET_SPORTS_ENERGY,
+                    UserMap.currentUid
+                )
+            ) {
+                Log.sports("运动能量兑换🎁目标应用未就绪，设置页使用缓存列表")
+                return emptyList()
+            }
+            val exchangeMap = IdMapManager.getInstance(SportsEnergyExchangeMap::class.java)
+            exchangeMap.load(UserMap.currentUid)
+            Log.sports("运动能量兑换🎁设置页加载目标应用刷新列表#${exchangeMap.map.size}")
+            return emptyList()
+        }
+        try {
+            val categoryTypes = linkedSetOf("")
+            runCatching {
+                AntSportsRpcCall.NeverlandRpcCall.queryCoinCenterPage()
+            }.onFailure {
+                Log.printStackTrace(TAG, "refreshSportsEnergyExchangeOptionsForSettings.queryCoinCenterPage err:", it)
+            }
+            runCatching {
+                AntSportsRpcCall.NeverlandRpcCall.deliverSportsItemMallPage()
+            }.onFailure {
+                Log.printStackTrace(TAG, "refreshSportsEnergyExchangeOptionsForSettings.deliverByPageId err:", it)
+            }
+            runCatching {
+                val categoryResp = JSONObject(AntSportsRpcCall.NeverlandRpcCall.queryItemCategoryList())
+                if (ResChecker.checkRes(TAG, "运动能量兑换分类查询失败:", categoryResp)) {
+                    val categoryList = extractSportsItemMallData(categoryResp).optJSONArray("itemCategoryVOList")
+                    if (categoryList != null) {
+                        for (i in 0 until categoryList.length()) {
+                            val categoryCode = categoryList.optJSONObject(i)?.optString("categoryCode").orEmpty()
+                            if (categoryCode.isNotBlank()) {
+                                categoryTypes.add(categoryCode)
+                            }
+                        }
+                    }
+                }
+            }.onFailure {
+                Log.printStackTrace(TAG, "refreshSportsEnergyExchangeOptionsForSettings.queryItemCategoryList err:", it)
+            }
+
+            val exchangeMap = IdMapManager.getInstance(SportsEnergyExchangeMap::class.java)
+            val candidateMap = LinkedHashMap<String, SportsEnergyExchangeCandidate>()
+            categoryTypes.forEach { categoryType ->
+                var pageNum = 1
+                var adSession = ""
+                while (pageNum <= 3) {
+                    val response = JSONObject(
+                        AntSportsRpcCall.NeverlandRpcCall.queryItemList(
+                            categoryType = categoryType,
+                            pageNum = pageNum,
+                            cityCode = SPORT_ITEM_MALL_CITY_CODE,
+                            adSession = adSession
+                        )
+                    )
+                    if (!ResChecker.checkRes(TAG, "运动能量兑换列表查询失败:", response)) {
+                        break
+                    }
+                    val data = extractSportsItemMallData(response)
+                    val itemList = data.optJSONArray("itemVOList") ?: break
+                    for (i in 0 until itemList.length()) {
+                        val candidate = buildSportsEnergyExchangeCandidate(itemList.optJSONObject(i) ?: continue) ?: continue
+                        candidateMap.putIfAbsent(candidate.item.id, candidate)
+                    }
+                    if (!data.optBoolean("hasMore", false)) {
+                        break
+                    }
+                    adSession = data.optString("adSession", adSession)
+                    pageNum++
+                }
+            }
+            if (candidateMap.isEmpty()) {
+                exchangeMap.save(UserMap.currentUid)
+                Log.sports("运动能量兑换🎁未获取到候选列表")
+                return emptyList()
+            }
+            val candidates = candidateMap.values.toList()
+            candidates.forEach { candidate ->
+                exchangeMap.add(candidate.item.id, candidate.item.displayName())
+            }
+            exchangeMap.save(UserMap.currentUid)
+            Log.sports("运动能量兑换🎁设置页刷新列表#${candidates.size}")
+            return candidates
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "refreshSportsEnergyExchangeOptionsForSettings err:", t)
+            return emptyList()
+        }
+    }
+
+    private fun sportsEnergyExchange() {
+        try {
+            val selectedIds: Set<String> = sportsEnergyExchangeList.value
+                ?.filterNotNull()
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+            val candidates = refreshSportsEnergyExchangeOptionsForSettings()
+            if (candidates.isEmpty()) {
+                return
+            }
+            val remainingSelectedIds: MutableSet<String>? = if (selectedIds.isNotEmpty()) selectedIds.toMutableSet() else null
+            for (candidate in candidates) {
+                if (!selectedIds.contains(candidate.item.id)) {
+                    continue
+                }
+                remainingSelectedIds?.remove(candidate.item.id)
+                if (candidate.item.safety == ExchangeSafety.UNAVAILABLE) {
+                    Log.sports("运动能量兑换🎁跳过[${candidate.item.displayName()}]#${candidate.item.safetyReason}")
+                } else {
+                    if (candidate.item.safety == ExchangeSafety.LOG_ONLY) {
+                        Log.sports("运动能量兑换🎁已勾选[${candidate.item.displayName()}]#仅提醒，不自动兑换")
+                    } else {
+                        exchangeSportsEnergyCandidate(candidate)
+                    }
+                }
+            }
+            remainingSelectedIds
+                ?.forEach { Log.sports("运动能量兑换🎁已勾选[$it]#本次列表未返回，保留配置不删除") }
+            Log.sports("运动能量兑换🎁列表刷新完成#${candidates.size}")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "sportsEnergyExchange err:", t)
+        }
+    }
+
+    internal fun refreshSportsEnergyExchangeOptionsForRemote() {
+        refreshSportsEnergyExchangeOptionsForSettings()
+    }
+
+    private fun exchangeSportsEnergyCandidate(candidate: SportsEnergyExchangeCandidate) {
+        runCatching {
+            AntSportsRpcCall.NeverlandRpcCall.deliverSportsItemMallPage("@alipay/health-island/goodsDetail")
+        }.onFailure {
+            Log.printStackTrace(TAG, "exchangeSportsEnergyCandidate.deliverGoodsDetail err:", it)
+        }
+        val detailResp = JSONObject(
+            AntSportsRpcCall.NeverlandRpcCall.queryItemDetail(
+                benefitId = candidate.benefitId,
+                itemId = candidate.itemId,
+                materialType = candidate.materialType,
+                cityCode = candidate.cityCode
+            )
+        )
+        if (!ResChecker.checkRes(TAG, "运动能量兑换详情查询失败:", detailResp)) {
+            Log.sports("运动能量兑换🎁兑换前详情校验失败[${candidate.item.name}]")
+            return
+        }
+        val detail = extractSportsItemMallData(detailResp).optJSONObject("itemDetailVO")
+        val verifiedCandidate = detail?.let { buildSportsEnergyExchangeCandidate(it) } ?: candidate
+        if (verifiedCandidate.item.safety != ExchangeSafety.AUTO) {
+            Log.sports("运动能量兑换🎁跳过[${verifiedCandidate.item.displayName()}]#${verifiedCandidate.item.safetyReason}")
+            return
+        }
+        val orderResp = JSONObject(
+            AntSportsRpcCall.NeverlandRpcCall.createOrder(
+                benefitId = verifiedCandidate.benefitId,
+                itemId = verifiedCandidate.itemId,
+                cityCode = verifiedCandidate.cityCode
+            )
+        )
+        if (ResChecker.checkRes(TAG, "运动能量兑换下单失败:", orderResp)) {
+            val purchaseType = extractSportsItemMallData(orderResp).optString("purchaseType").ifBlank { "purePoint" }
+            Log.sports("运动能量兑换🎁兑换[${verifiedCandidate.item.name}]#$purchaseType")
+            runCatching {
+                AntSportsRpcCall.NeverlandRpcCall.collectExchangeData(cityCode = verifiedCandidate.cityCode)
+            }.onFailure {
+                Log.printStackTrace(TAG, "exchangeSportsEnergyCandidate.collectData err:", it)
+            }
+        } else {
+            Log.sports("运动能量兑换🎁兑换失败[${verifiedCandidate.item.name}]#$orderResp")
+        }
+    }
+
+    private fun querySportsExchangeNeedEnergyValue(source: String): String {
+        return try {
+            val response = JSONObject(AntSportsRpcCall.NeverlandRpcCall.queryExchangeCondition(source))
+            if (!ResChecker.checkRes(TAG, response)) {
+                return "1"
+            }
+            val data = response.optJSONObject("data") ?: response.optJSONObject("result") ?: response
+            sequenceOf(
+                data.optString("needEnergyValue"),
+                data.optString("minEnergyValue"),
+                data.optString("assetAmount")
+            ).firstOrNull { it.isNotBlank() } ?: "1"
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "querySportsExchangeNeedEnergyValue err:", t)
+            "1"
+        }
+    }
+
+    private fun buildSportsEnergyExchangeCandidate(raw: JSONObject): SportsEnergyExchangeCandidate? {
+        val benefitId = raw.optString("benefitId").trim()
+        val itemId = raw.optString("itemId").trim()
+        if (benefitId.isEmpty() && itemId.isEmpty()) {
+            return null
+        }
+        val stableId = listOf(benefitId, itemId).filter { it.isNotBlank() }.joinToString("|")
+        val name = raw.optString("itemName", raw.optString("benefitName", stableId))
+        val status = raw.optString("status")
+        val remainCount = raw.optInt("remainCount", -1)
+        val tagText = collectSportsEnergyExchangeTags(raw.optJSONArray("tagValues"))
+        val salePoint = raw.optString("salePoint")
+        val displayPrice = raw.optString("displayPrice")
+        val displaySalePrice = raw.optString("displaySalePrice")
+        val materialType = raw.optString("materialType")
+        val itemSpecialType = raw.optString("itemSpecialType")
+        val unavailable = status.isNotBlank() && !status.equals("ITEM_SALE", true) ||
+            remainCount == 0
+        val hasCashPrice = hasPositiveSportsCash(displaySalePrice, raw.optString("salePrice")) ||
+            displayPrice.contains("元")
+        val manualMaterial = materialType.isBlank() || !materialType.equals("benefitItem", true)
+        val manualSpecialType = itemSpecialType.equals("goods", true) ||
+            itemSpecialType.equals("physical", true) ||
+            itemSpecialType.equals("platformPhysicalItem", true)
+        val orderLike = containsSportsOrderKeyword(
+            name,
+            materialType,
+            itemSpecialType,
+            raw.optString("displayDesc"),
+            raw.optString("lMItemVO"),
+            raw.optString("externJumpUrl")
+        )
+        val safety = when {
+            unavailable -> ExchangeSafety.UNAVAILABLE
+            hasCashPrice || manualMaterial || manualSpecialType || orderLike -> ExchangeSafety.LOG_ONLY
+            else -> ExchangeSafety.AUTO
+        }
+        val safetyReason = when {
+            unavailable -> when {
+                remainCount == 0 -> "库存不足"
+                status.isNotBlank() -> status
+                else -> "服务端状态不可兑换"
+            }
+            hasCashPrice -> "涉及实付金额"
+            manualMaterial || manualSpecialType || orderLike -> "商品/下单链路需手动处理"
+            else -> ""
+        }
+        return SportsEnergyExchangeCandidate(
+            ExchangeItem(
+                id = stableId,
+                name = name,
+                cost = ExchangeCost(
+                    pointText = displayPrice.ifBlank { salePoint.takeIf { it.isNotBlank() }?.let { "${it}能量" }.orEmpty() },
+                    cashText = displaySalePrice.takeIf { hasPositiveSportsCash(it) }?.let { "${it}元" }.orEmpty()
+                ),
+                limit = ExchangeLimit(
+                    stockText = remainCount.takeIf { it >= 0 }?.let { "库存$it" }.orEmpty(),
+                    validText = raw.optString("strInvalidDate"),
+                    statusText = listOf(status, tagText).filter { it.isNotBlank() }.joinToString("、")
+                ),
+                safety = safety,
+                safetyReason = safetyReason
+            ),
+            benefitId = benefitId,
+            itemId = itemId,
+            materialType = materialType,
+            cityCode = SPORT_ITEM_MALL_CITY_CODE
+        )
+    }
+
+    private fun extractSportsItemMallData(response: JSONObject): JSONObject {
+        return response.optJSONObject("data")
+            ?: response.optJSONObject("result")
+            ?: response
+    }
+
+    private fun hasPositiveSportsCash(vararg rawValues: String?): Boolean {
+        return rawValues.any { value ->
+            value?.trim().orEmpty().toBigDecimalOrNull()?.signum() == 1
+        }
+    }
+
+    private fun containsSportsOrderKeyword(vararg textValues: String?): Boolean {
+        val text = textValues.joinToString(" ").lowercase(Locale.getDefault())
+        return listOf("收货", "发货", "下单", "商品详情", "邮寄", "快递", "付邮", "邮费", "订单", "goods")
+            .any { text.contains(it.lowercase(Locale.getDefault())) }
+    }
+
+    private fun collectSportsEnergyExchangeTags(tags: JSONArray?): String {
+        if (tags == null || tags.length() == 0) {
+            return ""
+        }
+        val values = mutableListOf<String>()
+        for (i in 0 until tags.length()) {
+            val value = tags.optJSONObject(i)?.optString("value").orEmpty()
+            if (value.isNotBlank()) {
+                values.add(value)
+            }
+        }
+        return values.joinToString("、")
     }
 
     private fun tryBeginSyncStepTask(): Boolean {

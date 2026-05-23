@@ -985,6 +985,7 @@ class ApplicationHook {
                 filter.addAction(ApplicationHookConstants.BroadcastActions.MANUAL_TASK)
                 filter.addAction(ApplicationHookConstants.BroadcastActions.HOOK_READY)
                 filter.addAction(ApplicationHookConstants.BroadcastActions.REFRESH_FRIENDS)
+                filter.addAction(ApplicationHookConstants.BroadcastActions.REFRESH_EXCHANGE_OPTIONS)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(mBroadcastReceiver, filter, Context.RECEIVER_EXPORTED)

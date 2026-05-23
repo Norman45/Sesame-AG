@@ -269,11 +269,30 @@ object AntSesameCreditRpcCall {
         )
     }
 
-    fun queryExchangeList(page: Int, pageSize: Int): String {
-        val args =
-            """[{"currentPage":$page,"formDelivery":"false","pageSize":$pageSize,"privilegeSource":"","privilegeTab":"","tabList":[]}]"""
+    fun queryExchangeList(page: Int, pageSize: Int, tab: String? = null): String {
+        val tabList = JSONArray()
+        if (!tab.isNullOrBlank()) {
+            tabList.put(tab)
+        }
+        val args = JSONArray().put(JSONObject().apply {
+            put("currentPage", page)
+            put("formDelivery", "true")
+            put("pageSize", pageSize)
+            put("privilegeSource", "")
+            put("privilegeTab", "")
+            put("tabList", tabList)
+        }).toString()
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmmemberop.biz.rpc.award.AwardRpcManager.queryListV2",
+            args
+        )
+    }
+
+    @JvmStatic
+    fun queryAwardDetail(templateId: String): String {
+        val args = """[{"awardTemplateId":"$templateId"}]"""
+        return RequestManager.requestString(
+            "com.antgroup.zmxy.zmmemberop.biz.rpc.award.AwardRpcManager.queryDetail",
             args
         )
     }
@@ -283,6 +302,15 @@ object AntSesameCreditRpcCall {
         val args = """[{"awardTemplateId":"$templateId"}]"""
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmmemberop.biz.rpc.award.AwardRpcManager.obtainAward",
+            args
+        )
+    }
+
+    @JvmStatic
+    fun queryMyAwardDetail(awardId: String): String {
+        val args = """[{"awardId":"$awardId"}]"""
+        return RequestManager.requestString(
+            "com.antgroup.zmxy.zmmemberop.biz.rpc.award.AwardRpcManager.queryMyAwardDetail",
             args
         )
     }

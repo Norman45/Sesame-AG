@@ -13,6 +13,8 @@ import io.github.aoguai.sesameag.entity.friend.FriendCapabilityState
 import io.github.aoguai.sesameag.entity.MapperEntity
 import io.github.aoguai.sesameag.entity.OtherEntityProvider.farmFamilyOption
 import io.github.aoguai.sesameag.entity.ParadiseCoinBenefit
+import io.github.aoguai.sesameag.hook.ExchangeOptionsRefreshBridge
+import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.hook.Toast
 import io.github.aoguai.sesameag.hook.rpc.intervallimit.RpcIntervalLimit.addIntervalLimit
 import io.github.aoguai.sesameag.model.BaseModel
@@ -34,6 +36,10 @@ import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.task.antFarm.AntFarmFamily.familyClaimRewardList
 import io.github.aoguai.sesameag.task.antFarm.AntFarmFamily.familySign
+import io.github.aoguai.sesameag.task.exchange.ExchangeCost
+import io.github.aoguai.sesameag.task.exchange.ExchangeItem
+import io.github.aoguai.sesameag.task.exchange.ExchangeLimit
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafety
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.FriendGuard
@@ -841,7 +847,10 @@ class AntFarm : ModelTask() {
                 "paradiseCoinExchangeBenefitList",
                 "小鸡乐园 | 权益列表",
                 LinkedHashSet<String?>()
-            ) { ParadiseCoinBenefit.getList() }.withDesc("仅兑换列表中的小鸡乐园权益。需开启“小鸡乐园 | 兑换权益”。").also {
+            ) {
+                refreshParadiseCoinExchangeOptionsForSettings()
+                ParadiseCoinBenefit.getList()
+            }.withDesc("仅兑换列表中的小鸡乐园权益。需开启“小鸡乐园 | 兑换权益”。").also {
                 paradiseCoinExchangeBenefitList = it
             })
         modelFields.addField(
@@ -1141,6 +1150,61 @@ class AntFarm : ModelTask() {
     }
 
 
+    private fun refreshParadiseCoinExchangeOptionsForSettings() {
+        if (!HookReadyChecker.isCurrentProcessReadyForRpc(UserMap.currentUid)) {
+            if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid) ||
+                !ExchangeOptionsRefreshBridge.requestRefresh(
+                    ExchangeOptionsRefreshBridge.TARGET_FARM_PARADISE,
+                    UserMap.currentUid
+                )
+            ) {
+                Log.farm("小鸡乐园币💸目标应用未就绪，设置页使用缓存列表")
+                return
+            }
+            val benefitMap = IdMapManager.getInstance(ParadiseCoinBenefitIdMap::class.java)
+            benefitMap.load(UserMap.currentUid)
+            Log.farm("小鸡乐园币💸设置页加载目标应用刷新列表#${benefitMap.map.size}")
+            return
+        }
+        try {
+            val jo = JSONObject(AntFarmRpcCall.getMallHome())
+            if (!ResChecker.checkRes(TAG, jo)) {
+                Log.error(TAG, "小鸡乐园币💸[设置页刷新权益列表失败]")
+                return
+            }
+            val mallItemSimpleList = jo.optJSONArray("mallItemSimpleList") ?: return
+            val benefitMap = IdMapManager.getInstance(ParadiseCoinBenefitIdMap::class.java)
+            for (i in 0..<mallItemSimpleList.length()) {
+                val mallItemInfo = mallItemSimpleList.optJSONObject(i) ?: continue
+                val spuName = mallItemInfo.optString("spuName")
+                val minPrice = mallItemInfo.optInt("minPrice")
+                val controlTag = mallItemInfo.optString("controlTag")
+                val spuId = mallItemInfo.optString("spuId")
+                if (spuId.isBlank()) {
+                    continue
+                }
+                val itemStatusList = mallItemInfo.optJSONArray("itemStatusList")
+                val statusText = formatFarmPropStatusList(itemStatusList)
+                val exchangeItem = ExchangeItem(
+                    id = spuId,
+                    name = spuName.ifBlank { spuId },
+                    cost = ExchangeCost(pointText = "${minPrice}乐园币"),
+                    limit = ExchangeLimit(statusText = listOf(controlTag, statusText).filter { it.isNotBlank() }.joinToString("、")),
+                    safety = if (hasBlockingFarmPropStatus(itemStatusList)) ExchangeSafety.UNAVAILABLE else ExchangeSafety.AUTO,
+                    safetyReason = if (hasBlockingFarmPropStatus(itemStatusList)) statusText else ""
+                )
+                benefitMap.add(spuId, exchangeItem.displayName())
+            }
+            benefitMap.save(UserMap.currentUid)
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "refreshParadiseCoinExchangeOptionsForSettings err:", t)
+        }
+    }
+
+    internal fun refreshParadiseCoinExchangeOptionsForRemote() {
+        refreshParadiseCoinExchangeOptionsForSettings()
+    }
+
     internal suspend fun paradiseCoinExchangeBenefit() {
         try {
             val jo = JSONObject(AntFarmRpcCall.getMallHome())
@@ -1157,13 +1221,22 @@ class AntFarm : ModelTask() {
                 val minPrice = mallItemInfo.getInt("minPrice")
                 val controlTag = mallItemInfo.getString("controlTag")
                 val spuId = mallItemInfo.getString("spuId")
-                oderInfo = spuName + "\n价格" + minPrice + "乐园币\n" + controlTag
+                val itemStatusList = mallItemInfo.optJSONArray("itemStatusList")
+                val statusText = formatFarmPropStatusList(itemStatusList)
+                val exchangeItem = ExchangeItem(
+                    id = spuId,
+                    name = spuName,
+                    cost = ExchangeCost(pointText = "${minPrice}乐园币"),
+                    limit = ExchangeLimit(statusText = listOf(controlTag, statusText).filter { it.isNotBlank() }.joinToString("、")),
+                    safety = if (hasBlockingFarmPropStatus(itemStatusList)) ExchangeSafety.UNAVAILABLE else ExchangeSafety.AUTO,
+                    safetyReason = if (hasBlockingFarmPropStatus(itemStatusList)) statusText else ""
+                )
+                oderInfo = exchangeItem.displayName()
                 IdMapManager.getInstance(ParadiseCoinBenefitIdMap::class.java)
                     .add(spuId, oderInfo)
-                val itemStatusList = mallItemInfo.getJSONArray("itemStatusList")
                 if (!Status.canParadiseCoinExchangeBenefitToday(spuId) ||
                     paradiseCoinExchangeBenefitList?.value?.contains(spuId) != true ||
-                    isExchange(itemStatusList, spuId, spuName)
+                    isExchange(itemStatusList ?: JSONArray(), spuId, spuName)
                 ) {
                     continue
                 }
@@ -1218,6 +1291,38 @@ class AntFarm : ModelTask() {
             return ResChecker.checkRes(TAG, jo)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "exchangeBenefit err:",t)
+        }
+        return false
+    }
+
+    private fun formatFarmPropStatusList(itemStatusList: JSONArray?): String {
+        if (itemStatusList == null || itemStatusList.length() == 0) {
+            return ""
+        }
+        val statuses = mutableListOf<String>()
+        for (j in 0..<itemStatusList.length()) {
+            val itemStatus = itemStatusList.optString(j)
+            if (itemStatus.isBlank()) {
+                continue
+            }
+            val statusName = runCatching { PropStatus.valueOf(itemStatus).nickName()?.toString() }
+                .getOrNull()
+                ?: itemStatus
+            statuses.add(statusName)
+        }
+        return statuses.joinToString("、")
+    }
+
+    private fun hasBlockingFarmPropStatus(itemStatusList: JSONArray?): Boolean {
+        if (itemStatusList == null || itemStatusList.length() == 0) {
+            return false
+        }
+        for (j in 0..<itemStatusList.length()) {
+            when (itemStatusList.optString(j)) {
+                PropStatus.REACH_LIMIT.name,
+                PropStatus.REACH_USER_HOLD_LIMIT.name,
+                PropStatus.NO_ENOUGH_POINT.name -> return true
+            }
         }
         return false
     }

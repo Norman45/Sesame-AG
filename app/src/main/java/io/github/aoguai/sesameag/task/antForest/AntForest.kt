@@ -12,6 +12,7 @@ import io.github.aoguai.sesameag.entity.OtherEntityProvider.listEcoLifeOptions
 import io.github.aoguai.sesameag.entity.OtherEntityProvider.listHealthcareOptions
 import io.github.aoguai.sesameag.entity.VitalityStore
 import io.github.aoguai.sesameag.entity.VitalityStore.Companion.getNameById
+import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.util.GameTask
 import io.github.aoguai.sesameag.hook.RequestManager.requestString
 import io.github.aoguai.sesameag.hook.Toast
@@ -198,12 +199,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var doubleCard: ChoiceModelField? = null // 双击卡类型选择
     private var doubleCardTime: TimeTriggerModelField? = null // 双击卡使用时间列表
     var doubleCountLimit: IntegerModelField? = null // 双击卡使用次数限制
+    private var doubleCardConstant: BooleanModelField? = null // 双击卡永动机开关
 
-    private var doubleCardConstant: BooleanModelField? = null // 双击卡永动机
     private var stealthCard: ChoiceModelField? = null // 隐身卡
-    private var stealthCardConstant: BooleanModelField? = null // 隐身卡永动机
+    private var stealthCardConstant: BooleanModelField? = null // 隐身卡永动机开关
     private var shieldCard: ChoiceModelField? = null // 保护罩
-    private var shieldCardConstant: BooleanModelField? = null // 限时保护永动机
+    private var shieldCardConstant: BooleanModelField? = null // 保护罩永动机开关
     private var helpFriendCollectType: ChoiceModelField? = null
     private var helpFriendCollectList: FriendSelectionModelField? = null
     private var helpFriendCollectListLimit: IntegerModelField? = null
@@ -536,12 +537,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             ).withDesc("仅在这些时间点或允许时间段内尝试使用双击卡；支持 HHmm、HHmm-HHmm，填 -1 关闭。").also {
                 doubleCardTime = it
             })
-        // 双击卡永动机
         modelFields.addField(
             BooleanModelField(
                 "DoubleCardConstant", "双击卡 | 自动兑换限时卡", false
-            ).withDesc("背包没有双击卡时自动尝试兑换限时双击卡。需开启“双击卡 | 消耗类型”。").also { doubleCardConstant = it }
-        )
+            ).withDesc("背包没有双击卡时，允许按“活力值 | 兑换列表”中已勾选且名称命中的项自动补货。需同时开启“活力值 | 开启兑换”。").also {
+                doubleCardConstant = it
+            })
         modelFields.addField(
             ChoiceModelField(
                 "bubbleBoostCard",
@@ -575,7 +576,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "shieldCardConstant",
                 "能量保护罩 | 自动兑换限时卡",
                 false
-            ).withDesc("背包没有保护罩时自动尝试兑换限时保护罩。需开启“能量保护罩 | 消耗类型”。").also { shieldCardConstant = it })
+            ).withDesc("背包没有保护罩时，允许按“活力值 | 兑换列表”中已勾选且名称命中的项自动补货。需同时开启“活力值 | 开启兑换”。").also {
+                shieldCardConstant = it
+            })
 
         modelFields.addField(
             ChoiceModelField(
@@ -617,7 +620,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "stealthCardConstant",
                 "隐身卡 | 自动兑换限时卡",
                 false
-            ).withDesc("背包没有隐身卡时自动尝试兑换限时隐身卡。需开启“隐身卡 | 消耗类型”。").also { stealthCardConstant = it })
+            ).withDesc("背包没有隐身卡时，允许按“活力值 | 兑换列表”中已勾选且名称命中的项自动补货。需同时开启“活力值 | 开启兑换”。").also {
+                stealthCardConstant = it
+            })
         modelFields.addField(
             IntegerModelField(
                 "returnWater10",
@@ -699,7 +704,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         modelFields.addField(
             SelectAndCountModelField(
                 "vitalityExchangeList", "活力值 | 兑换列表", LinkedHashMap<String?, Int?>(),
-                VitalityStore::list,
+                this::refreshVitalityExchangeOptionsForSettings,
                 "记得填兑换次数..亲爱的"
             ).withDesc("配置活力值商店兑换项及每日兑换次数。").also { vitalityExchangeList = it })
         modelFields.addField(BooleanModelField("userPatrol", "保护地巡护 | 开启", false).withDesc(
@@ -1817,7 +1822,23 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         }
     }
 
-    internal fun handleVitalityExchange() {
+    private fun refreshVitalityExchangeOptionsForSettings(): List<VitalityStore> {
+        if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid)) {
+            Log.forest("活力值兑换🎁目标应用未启动，设置页使用缓存列表")
+            return VitalityStore.list
+        }
+        return runCatching {
+            Vitality.initVitality("SC_ASSETS")
+            VitalityStore.list
+        }.onFailure {
+            Log.printStackTrace(TAG, "refreshVitalityExchangeOptionsForSettings err:", it)
+        }.getOrElse {
+            VitalityStore.list
+        }
+    }
+
+    internal fun handleVitalityExchange(itemFilter: ((String, String) -> Boolean)? = null): Boolean {
+        var exchangedAny = false
         try {
 //            JSONObject bag = getBag();
 
@@ -1831,18 +1852,46 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     Log.forest("无效的count值: skuId=$skuId, count=$count")
                     continue
                 }
+                val skuName = Vitality.skuInfo[skuId]?.optString("skuName").orEmpty()
+                if (itemFilter != null && !itemFilter(skuId, skuName)) {
+                    continue
+                }
                 // 处理活力值兑换
                 while (Status.canVitalityExchangeToday(skuId, count)) {
                     if (!Vitality.handleVitalityExchange(skuId)) {
                         Log.forest("活力值兑换失败: " + getNameById(skuId))
                         break
                     }
+                    exchangedAny = true
                     GlobalThreadPools.sleepCompat(1000L)
                 }
             }
         } catch (t: Throwable) {
             handleException("handleVitalityExchange", t)
         }
+        return exchangedAny
+    }
+
+    private fun exchangeSelectedVitalityRewardsForMissingProp(
+        propName: String,
+        allowPerpetualExchange: Boolean,
+        vararg nameKeywords: String
+    ): JSONObject? {
+        if (!allowPerpetualExchange) {
+            return null
+        }
+        if (vitalityExchange?.value != true) {
+            return null
+        }
+        val exchangeList = vitalityExchangeList?.value ?: emptyMap()
+        if (exchangeList.isEmpty()) {
+            return null
+        }
+        Log.forest("背包中没有$propName，尝试按“活力值 | 兑换列表”兑换已勾选权益...")
+        val exchanged = handleVitalityExchange { _, skuName ->
+            nameKeywords.any { keyword -> skuName.contains(keyword) }
+        }
+        return if (exchanged) queryPropList(true) else null
     }
 
     private fun notifyMain() {
@@ -3835,46 +3884,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         if (waterEnergy >= 33) return 41
         if (waterEnergy >= 18) return 40
         return 39
-    }
-
-    /**
-     * 兑换能量保护罩
-     * 类别 spuid skuid price
-     * 限时 CR20230517000497  CR20230516000370  166
-     * 永久 CR20230517000497  CR20230516000371  500
-     */
-    private fun exchangeEnergyShield(): Boolean {
-        val spuId = "CR20230517000497"
-        val skuId = "CR20230516000370"
-        if (!Status.canVitalityExchangeToday(skuId, 1)) {
-            return false
-        }
-        return Vitality.VitalityExchange(spuId, skuId, "保护罩")
-    }
-
-    /**
-     * 兑换隐身卡
-     */
-    private fun exchangeStealthCard(): Boolean {
-        val skuId = "SK20230521000206"
-        val spuId = "SP20230521000082"
-        if (!Status.canVitalityExchangeToday(skuId, 1)) {
-            return false
-        }
-        return Vitality.VitalityExchange(spuId, skuId, "隐身卡")
-    }
-
-    /**
-     * 兑换双击卡
-     * 优先兑换31天双击卡，失败后尝试限时双击卡
-     */
-    private fun exchangeDoubleCard(): Boolean {
-        // 尝试兑换31天双击卡
-        if (Vitality.handleVitalityExchange("SK20240805004754")) {
-            return true
-        }
-        // 失败后尝试兑换限时双击卡
-        return Vitality.handleVitalityExchange("CR20230516000363")
     }
 
     /**
@@ -6337,7 +6346,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      *
      * @param bagObject 背包的JSON对象
      */
-    private fun useDoubleCard(bagObject: JSONObject) {
+    private fun useDoubleCard(bagObject: JSONObject, allowVitalityExchangeFallback: Boolean = true) {
         try {
             if (doubleEndTime > System.currentTimeMillis()) {
                 Log.forest("双击卡已生效，剩余${formatTimeDifference(doubleEndTime - System.currentTimeMillis())}，跳过重复使用")
@@ -6355,32 +6364,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             }
 
             val forestPropVOList = bagObject.optJSONArray("forestPropVOList") ?: return
-
-            // 永动机逻辑：如果背包内没有双击卡且开启了永动机，尝试兑换
-            var hasProp = false
-            for (i in 0..<forestPropVOList.length()) {
-                val prop = forestPropVOList.optJSONObject(i)
-                if (prop != null && "doubleClick" == prop.optString("propGroup")) {
-                    hasProp = true
-                    break
-                }
-            }
-
-            if (!hasProp && doubleCardConstant?.value == true) {
-                Log.forest("背包中没有双击卡，尝试兑换...")
-                if (exchangeDoubleCard()) {
-                    // 重新获取背包数据
-                    val newBagObject = queryPropList()
-                    if (newBagObject != null) {
-                        val newForestPropVOList = newBagObject.optJSONArray("forestPropVOList")
-                        if (newForestPropVOList != null) {
-                            // 递归调用，使用新的背包数据
-                            useDoubleCard(newBagObject)
-                            return
-                        }
-                    }
-                }
-            }
 
             // 步骤1: 根据用户UI设置，筛选出需要使用的双击卡
             val doubleClickProps: MutableList<JSONObject> = ArrayList()
@@ -6401,6 +6384,17 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
             }
             if (doubleClickProps.isEmpty()) {
+                if (allowVitalityExchangeFallback) {
+                    val refreshedBag = exchangeSelectedVitalityRewardsForMissingProp(
+                        "双击卡",
+                        doubleCardConstant?.value == true,
+                        "双击卡"
+                    )
+                    if (refreshedBag != null) {
+                        useDoubleCard(refreshedBag, false)
+                        return
+                    }
+                }
                 Log.forest("根据设置，背包中没有需要使用的双击卡")
                 return
             }
@@ -6480,7 +6474,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             "隐身卡",
             arrayOf<String>("LIMIT_TIME_STEALTH_CARD", "STEALTH_CARD"),
             null,  // 无特殊条件
-            { this.exchangeStealthCard() },
+            { exchangeSelectedVitalityRewardsForMissingProp("隐身卡", stealthCardConstant?.value == true, "隐身") != null },
             { time: Long? -> stealthEndTime = time!! + TimeFormatter.ONE_DAY_MS }
         )
         usePropTemplate(bagObject, config, stealthCardConstant?.value == true)
@@ -6494,7 +6488,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      * 支持来源：
      *   - 背包中已有的多种类型保护罩
      *   - 青春特权自动领取（若开启）
-     *   - 活力值兑换（若开启且兑换成功）
+     *   - 活力值兑换列表统一处理，不在道具使用路径旁路兑换
      *
      * @param bagObject 当前背包的 JSON 对象（可能为 null）
      */
@@ -6540,12 +6534,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     }
                 }
 
-                // 2.2 若仍未找到，且活力值兑换开启 → 尝试兑换
-                if (availableShields.isEmpty() && shieldCardConstant?.value == true) {
-                    Log.forest("尝试通过活力值兑换保护罩...")
-                    if (exchangeEnergyShield()) {
-                        collectShieldsFromBag(queryPropList(true), availableShields)
-                    }
+                // 2.2 使用统一活力值兑换列表补货，不再维护保护罩专用兑换开关或硬编码 SKU。
+                if (availableShields.isEmpty()) {
+                    val refreshedBag = exchangeSelectedVitalityRewardsForMissingProp(
+                        "保护罩",
+                        shieldCardConstant?.value == true,
+                        "保护罩"
+                    )
+                    collectShieldsFromBag(refreshedBag, availableShields)
                 }
             }
 

@@ -9,8 +9,11 @@ import io.github.aoguai.sesameag.data.Status.Companion.memberPointExchangeBenefi
 import io.github.aoguai.sesameag.data.Status.Companion.memberSignInToday
 import io.github.aoguai.sesameag.data.Status.Companion.setFlagToday
 import io.github.aoguai.sesameag.data.StatusFlags
+import io.github.aoguai.sesameag.entity.BeanExchangeRight
 import io.github.aoguai.sesameag.entity.MemberBenefit
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.ExchangeOptionsRefreshBridge
+import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.hook.internal.LocationHelper.requestLocationSuspend
 import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.ModelGroup
@@ -19,6 +22,11 @@ import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.antOrchard.UrlUtil
+import io.github.aoguai.sesameag.task.exchange.ExchangeCost
+import io.github.aoguai.sesameag.task.exchange.ExchangeItem
+import io.github.aoguai.sesameag.task.exchange.ExchangeLimit
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafety
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafetyRules
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.Log
@@ -27,6 +35,7 @@ import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.util.TaskBlacklist
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.IdMapManager
+import io.github.aoguai.sesameag.util.maps.BeanExchangeRightMap
 import io.github.aoguai.sesameag.util.maps.MemberBenefitsMap
 import io.github.aoguai.sesameag.util.maps.UserMap
 import kotlinx.coroutines.Deferred
@@ -67,7 +76,8 @@ class AntMember : ModelTask() {
     internal var merchantKmdk: BooleanModelField? = null
     internal var merchantMoreTask: BooleanModelField? = null
     internal var beanSignIn: BooleanModelField? = null
-    internal var beanExchangeBubbleBoost: BooleanModelField? = null
+    internal var beanExchangeRight: BooleanModelField? = null
+    private var beanExchangeRightList: SelectModelField? = null
     private val loggedUnsupportedMemberTaskIds = LinkedHashSet<String>()
     private var unsupportedMemberTaskOverflowLogged = false
 
@@ -138,6 +148,24 @@ class AntMember : ModelTask() {
     private data class StickerFollowUpResult(
         val success: Boolean = true,
         val handled: Boolean = false
+    )
+
+    private data class MemberExchangeCandidate(
+        val item: ExchangeItem,
+        val benefitId: String,
+        val itemId: String,
+        val pointNeeded: String,
+        val benefitMark: String,
+        val itemSource: String,
+        val requestSourceInfo: String = "",
+        val sourcePassMap: JSONObject? = null
+    )
+
+    private data class BeanExchangeCandidate(
+        val item: ExchangeItem,
+        val rightsId: String,
+        val assetAmount: Int,
+        val needOrder: Int
     )
 
     private enum class StickerRpcFailureType {
@@ -218,15 +246,16 @@ class AntMember : ModelTask() {
         modelFields.addField(
             BooleanModelField(
                 "memberPointExchangeBenefit", "会员积分 | 兑换权益", false
-            ).withDesc("按“会员积分 | 兑换列表”自动尝试兑换会员权益或道具。").also { memberPointExchangeBenefit = it })
+            ).withDesc("按“会员积分 | 兑换列表”处理已勾选权益；仅纯积分虚拟道具自动兑换，实付或下单权益只记录提醒。").also { memberPointExchangeBenefit = it })
         modelFields.addField(
             SelectModelField(
                 "memberPointExchangeBenefitList",
                 "会员积分 | 兑换列表",
                 LinkedHashSet<String?>()
             ) {
+                refreshMemberPointExchangeOptionsForSettings()
                 MemberBenefit.getList()
-            }.withDesc("勾选允许自动兑换的会员权益。需开启“会员积分 | 兑换权益”。").also { memberPointExchangeBenefitList = it })
+            }.withDesc("勾选需要处理的会员权益。需开启“会员积分 | 兑换权益”。").also { memberPointExchangeBenefitList = it })
 
 
 
@@ -270,8 +299,17 @@ class AntMember : ModelTask() {
             ).withDesc("执行安心豆每日签到，领取当天可得的安心豆奖励。").also { beanSignIn = it })
         modelFields.addField(
             BooleanModelField(
-                "beanExchangeBubbleBoost", "安心豆 | 兑换时光加速器", false
-            ).withDesc("在安心豆余额足够时自动兑换时光加速器。").also { beanExchangeBubbleBoost = it })
+                "beanExchangeRight", "安心豆 | 兑换权益", false
+            ).withDesc("按“安心豆 | 兑换列表”刷新并处理安心豆权益；涉及下单或外跳的权益只记录提醒。").also { beanExchangeRight = it })
+        modelFields.addField(
+            SelectModelField(
+                "beanExchangeRightList",
+                "安心豆 | 兑换列表",
+                LinkedHashSet<String?>()
+            ) {
+                refreshBeanExchangeRightOptionsForSettings()
+                BeanExchangeRight.getList()
+            }.withDesc("勾选允许处理的安心豆权益，需开启“安心豆 | 兑换权益”。").also { beanExchangeRightList = it })
        /* modelFields.addField(
             BooleanModelField(
                 "annualReview", "年度回顾", false
@@ -664,110 +702,305 @@ class AntMember : ModelTask() {
     /**
      * 会员积分0元兑，权益道具兑换
      */
+    private fun refreshMemberPointExchangeOptionsForSettings() {
+        if (!HookReadyChecker.isCurrentProcessReadyForRpc(UserMap.currentUid)) {
+            if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid) ||
+                !ExchangeOptionsRefreshBridge.requestRefresh(
+                    ExchangeOptionsRefreshBridge.TARGET_MEMBER_POINT,
+                    UserMap.currentUid
+                )
+            ) {
+                Log.member("会员积分🎐目标应用未就绪，设置页使用缓存列表")
+                return
+            }
+            val memberBenefitMap = IdMapManager.getInstance(MemberBenefitsMap::class.java)
+            memberBenefitMap.load(UserMap.currentUid)
+            Log.member("会员积分🎐设置页加载目标应用刷新列表#${memberBenefitMap.map.size}")
+            return
+        }
+        try {
+            val userId = UserMap.currentUid
+            val memberInfo = JSONObject(AntMemberRpcCall.queryMemberInfo())
+            if (!ResChecker.checkRes(TAG, "会员积分兑换列表刷新失败:", memberInfo)) {
+                return
+            }
+            val pointBalance = memberInfo.optString("pointBalance")
+                .ifEmpty { memberInfo.optInt("pointBalance", 0).toString() }
+            val memberBenefitMap = IdMapManager.getInstance(MemberBenefitsMap::class.java)
+            val candidateMap = queryMemberExchangeCandidates(userId, pointBalance)
+            candidateMap.values.forEach { candidate ->
+                memberBenefitMap.add(candidate.item.id, candidate.item.displayName())
+            }
+            memberBenefitMap.save(userId)
+            Log.member("会员积分🎐设置页刷新兑换列表#${candidateMap.size}")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "refreshMemberPointExchangeOptionsForSettings err:", t)
+        }
+    }
+
+    internal fun refreshMemberPointExchangeOptionsForRemote() {
+        refreshMemberPointExchangeOptionsForSettings()
+    }
+
+    private fun queryMemberExchangeCandidates(
+        userId: String?,
+        pointBalance: String,
+        sleepMillis: Long = 0L
+    ): LinkedHashMap<String, MemberExchangeCandidate> {
+        val candidateMap = LinkedHashMap<String, MemberExchangeCandidate>()
+        var currentPage = 1
+        var hasNextPage = true
+        while (hasNextPage) {
+            if (sleepMillis > 0L) {
+                GlobalThreadPools.sleepCompat(sleepMillis)
+            }
+            val responseStr = AntMemberRpcCall.queryShandieEntityList(userId.orEmpty(), pointBalance, currentPage, 18)
+            if (responseStr.isEmpty()) {
+                break
+            }
+            val jo = JSONObject(responseStr)
+            if (!ResChecker.checkRes(TAG, "会员积分闪兑列表查询失败:", jo)) {
+                break
+            }
+            addMemberExchangeCandidates(jo.optJSONArray("benefits"), candidateMap)
+            val nextPageNum = jo.optInt("nextPageNum", 0)
+            hasNextPage = nextPageNum > currentPage
+            currentPage = if (hasNextPage) nextPageNum else currentPage
+        }
+
+        val deliveryUniqueId = "${System.currentTimeMillis()}and99999999INTELLIGENT_SORT5000551494000SR2024110510425045,94000SR2025091714812006,94000SR2023102305988003"
+        currentPage = 1
+        hasNextPage = true
+        while (hasNextPage && currentPage <= 10) {
+            if (sleepMillis > 0L) {
+                GlobalThreadPools.sleepCompat(sleepMillis)
+            }
+            val jo = JSONObject(
+                AntMemberRpcCall.queryDeliveryZoneDetail(
+                    pointBalance = pointBalance,
+                    pageNum = currentPage,
+                    pageSize = 18,
+                    uniqueId = deliveryUniqueId
+                )
+            )
+            if (!ResChecker.checkRes(TAG, "会员积分专区列表查询失败:", jo)) {
+                break
+            }
+            val uniqueId = jo.optString("uniqueId", deliveryUniqueId)
+            addMemberExchangeCandidates(jo.optJSONArray("briefConfigInfos"), candidateMap, currentPage, 18, uniqueId)
+            addMemberExchangeEntityCandidates(jo.optJSONArray("entityInfoList"), candidateMap, currentPage, 18, uniqueId)
+            val nextPageNum = jo.optInt("nextPageNum", 0)
+            hasNextPage = nextPageNum > currentPage
+            currentPage = if (hasNextPage) nextPageNum else currentPage
+        }
+        return candidateMap
+    }
+
+    private fun addMemberExchangeCandidates(
+        benefits: JSONArray?,
+        candidateMap: LinkedHashMap<String, MemberExchangeCandidate>,
+        pageNum: Int = 1,
+        pageSize: Int = 18,
+        uniqueId: String = ""
+    ) {
+        if (benefits == null || benefits.length() == 0) {
+            return
+        }
+        for (i in 0 until benefits.length()) {
+            val globalIndex = (pageNum - 1) * pageSize + i + 1
+            val sourcePassMap = if (uniqueId.isNotBlank()) buildMemberDeliveryZoneSourcePassMap(uniqueId, globalIndex) else null
+            val requestSourceInfo = uniqueId.takeIf { it.isNotBlank() }?.let { "SID:$it|$globalIndex" }.orEmpty()
+            val candidate = buildMemberExchangeCandidate(
+                benefits.optJSONObject(i) ?: continue,
+                requestSourceInfo = requestSourceInfo,
+                sourcePassMap = sourcePassMap
+            ) ?: continue
+            candidateMap.putIfAbsent(candidate.item.id, candidate)
+        }
+    }
+
+    private fun addMemberExchangeEntityCandidates(
+        entities: JSONArray?,
+        candidateMap: LinkedHashMap<String, MemberExchangeCandidate>,
+        pageNum: Int,
+        pageSize: Int,
+        uniqueId: String
+    ) {
+        if (entities == null || entities.length() == 0) {
+            return
+        }
+        for (i in 0 until entities.length()) {
+            val benefit = entities.optJSONObject(i)?.optJSONObject("benefitInfo") ?: continue
+            val globalIndex = (pageNum - 1) * pageSize + i + 1
+            val sourcePassMap = buildMemberDeliveryZoneSourcePassMap(uniqueId, globalIndex)
+            val candidate = buildMemberExchangeCandidate(
+                benefit,
+                requestSourceInfo = "SID:$uniqueId|$globalIndex",
+                sourcePassMap = sourcePassMap
+            ) ?: continue
+            candidateMap.putIfAbsent(candidate.item.id, candidate)
+        }
+    }
+
+    private fun buildMemberDeliveryZoneSourcePassMap(uniqueId: String, feedsIndex: Int): JSONObject {
+        return JSONObject().apply {
+            put("bid", "202412231259661040")
+            put("feedsIndex", feedsIndex.toString())
+            put("innerSource", "a159.b114660")
+            put("isCpc", "")
+            put("source", "")
+            put("unid", "")
+            put("uniqueId", uniqueId)
+        }
+    }
+
+    private fun refreshBeanExchangeRightOptionsForSettings() {
+        if (!HookReadyChecker.isCurrentProcessReadyForRpc(UserMap.currentUid)) {
+            if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid) ||
+                !ExchangeOptionsRefreshBridge.requestRefresh(
+                    ExchangeOptionsRefreshBridge.TARGET_BEAN_RIGHT,
+                    UserMap.currentUid
+                )
+            ) {
+                Log.member("安心豆🫘目标应用未就绪，设置页使用缓存列表")
+                return
+            }
+            val beanRightMap = IdMapManager.getInstance(BeanExchangeRightMap::class.java)
+            beanRightMap.load(UserMap.currentUid)
+            Log.member("安心豆🫘设置页加载目标应用刷新列表#${beanRightMap.map.size}")
+            return
+        }
+        try {
+            val userId = UserMap.currentUid
+            val candidateMap = queryBeanExchangeCandidates(queryBlueBeanBalance())
+            val beanRightMap = IdMapManager.getInstance(BeanExchangeRightMap::class.java)
+            candidateMap.values.forEach { candidate ->
+                beanRightMap.add(candidate.item.id, candidate.item.displayName())
+            }
+            beanRightMap.save(userId)
+            Log.member("安心豆🫘设置页刷新兑换列表#${candidateMap.size}")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "refreshBeanExchangeRightOptionsForSettings err:", t)
+        }
+    }
+
+    internal fun refreshBeanExchangeRightOptionsForRemote() {
+        refreshBeanExchangeRightOptionsForSettings()
+    }
+
+    private fun queryBeanExchangeCandidates(beanBalance: Int?): LinkedHashMap<String, BeanExchangeCandidate> {
+        val candidateMap = LinkedHashMap<String, BeanExchangeCandidate>()
+        val bizProperties = listOf(
+            "",
+            "RED_PACKET_COUPON",
+            "VOUCHER_CARD",
+            "CASH_MEMBER",
+            "HEALTH",
+            "HOEM_DALIY",
+            "MOTHER_BABY_TOYS"
+        )
+        for (bizProperty in bizProperties) {
+            var pageStartIndex = 0
+            var pageCount = 0
+            while (pageCount < 10) {
+                pageCount++
+                val response = JSONObject(
+                    AntMemberRpcCall.rightsRecommend(
+                        pageStartIndex = pageStartIndex,
+                        bizProperty = bizProperty
+                    )
+                )
+                if (!ResChecker.checkRes(TAG, "安心豆权益推荐列表查询失败:", response)) {
+                    break
+                }
+                addBeanExchangeCandidates(response, candidateMap, fromHistory = false, beanBalance = beanBalance)
+                val result = extractBeanExchangeResult(response)
+                if (!result.optBoolean("hasNext", false)) {
+                    break
+                }
+                val nextStartIndex = result.optInt("pageEndIndex", pageStartIndex)
+                if (nextStartIndex <= pageStartIndex) {
+                    break
+                }
+                pageStartIndex = nextStartIndex
+            }
+        }
+        runCatching {
+            val response = JSONObject(AntMemberRpcCall.queryRightsPreExchangeFlows(pageStartIndex = 0, pageSize = 99))
+            if (ResChecker.checkRes(TAG, "安心豆预兑换列表查询失败:", response)) {
+                addBeanExchangeCandidates(response, candidateMap, fromHistory = false, beanBalance = beanBalance)
+            }
+        }.onFailure {
+            Log.printStackTrace(TAG, "queryBeanExchangeCandidates.queryRightsPreExchangeFlows err:", it)
+        }
+        return candidateMap
+    }
+
     internal fun memberPointExchangeBenefit() {
         if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE)) {
             return
         }
-        val whiteList: Set<String> = memberPointExchangeBenefitList?.value
+        val selectedIds: Set<String> = memberPointExchangeBenefitList?.value
             ?.filterNotNull()
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             ?.toSet()
             ?: emptySet()
-        if (whiteList.isNotEmpty() && whiteList.all { !canMemberPointExchangeBenefitToday(it) }) {
+        if (selectedIds.isNotEmpty() && selectedIds.all { !canMemberPointExchangeBenefitToday(it) }) {
             Log.member("会员积分🎐兑换列表今日已全部处理，跳过执行")
             setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE)
             return
         }
         try {
             val userId = UserMap.currentUid
-            Log.member("会员积分商品加载..")
-            val remainingWhiteList: MutableSet<String>? = if (whiteList.isNotEmpty()) whiteList.toMutableSet() else null
-            // 1. 分类配置直接放在函数内部
-            val categoryMap = mapOf(
-                "公益道具" to listOf("94000SR2025022012011004"),
-                "出行旅游" to listOf("94000SR2025010611441006", "94000SR2025010611458001"),
-                "餐饮" to listOf("94000SR2025110315351006"),
-                "皮肤藏品" to listOf("94000SR2025110315357001", "94000SR2025111015444005"),
-                "理财还款" to listOf("94000SR2025011411575008", "94000SR2025091814834002"),
-                "红包神券" to listOf("94000SR2025092414916001"),
-                "充值缴费" to listOf("94000SR2025011611640002", "94000SR2025091814821018")
-            )
-            // 3. 遍历分类
-            categoryMap.forEach { (catName, ids) ->
-                var currentPage = 1
-                var hasNextPage = true
-                while (hasNextPage) {//此处请求过载，容易风控，循环频繁请求会炸
-                    GlobalThreadPools.sleepCompat(1000L)
-                    val responseStr = AntMemberRpcCall.queryDeliveryZoneDetail(ids, currentPage, 48)
-                    if (responseStr.isNullOrEmpty()) {
-                        Log.error(TAG, "分类[$catName] 接口返回空字符串")
-                        break
+            val memberInfo = JSONObject(AntMemberRpcCall.queryMemberInfo())
+            if (!ResChecker.checkRes(TAG, "会员积分信息查询失败:", memberInfo)) {
+                return
+            }
+            val pointBalance = memberInfo.optString("pointBalance")
+                .ifEmpty { memberInfo.optInt("pointBalance", 0).toString() }
+            val remainingSelectedIds: MutableSet<String>? = if (selectedIds.isNotEmpty()) {
+                selectedIds.toMutableSet()
+            } else {
+                null
+            }
+            val memberBenefitMap = IdMapManager.getInstance(MemberBenefitsMap::class.java)
+            Log.member("会员积分🎐兑换列表刷新..")
+            val candidateMap = queryMemberExchangeCandidates(userId, pointBalance, 1000L)
+            candidateMap.values.forEach { candidate ->
+                memberBenefitMap.add(candidate.item.id, candidate.item.displayName())
+                if (!selectedIds.contains(candidate.item.id)) {
+                    return@forEach
+                }
+                remainingSelectedIds?.remove(candidate.item.id)
+                if (!canMemberPointExchangeBenefitToday(candidate.item.id)) {
+                    Log.member("会员积分🎐跳过[${candidate.item.name}]#今日已处理")
+                    return@forEach
+                }
+                when (candidate.item.safety) {
+                    ExchangeSafety.UNAVAILABLE -> {
+                        Log.member("会员积分🎐跳过[${candidate.item.displayName()}]#${candidate.item.safetyReason}")
                     }
-                    val jo = JSONObject(responseStr)
-                    if (!ResChecker.checkRes(TAG, jo)) {
-                        Log.error(TAG, "分类[$catName] 校验失败: $responseStr")
-                        break
+                    ExchangeSafety.LOG_ONLY -> {
+                        Log.member("会员积分🎐已勾选[${candidate.item.displayName()}]#仅提醒，不自动兑换")
+                        memberPointExchangeBenefitToday(candidate.item.id)
                     }
-                    val benefits = jo.optJSONArray("briefConfigInfos")
-                    if (benefits == null || benefits.length() == 0) {
-                        Log.error(TAG, "分类[$catName] 第 $currentPage 页没有权益数据")
-                        break
-                    }
-                    for (i in 0 until benefits.length()) {
-                        val rawItem = benefits.getJSONObject(i)
-                        // 兼容 benefitInfo 嵌套结构
-                        val benefit = if (rawItem.has("benefitInfo")) rawItem.getJSONObject("benefitInfo") else rawItem
-                        val name = benefit.optString("name", "未知")
-                        val benefitId = benefit.optString("benefitId")
-                        val itemId = benefit.optString("itemId")
-                        val pointNeeded = benefit.optJSONObject("pricePresentation")?.optString("point") ?: "0"
-                        if (benefitId.isEmpty()) {
-                            Log.member("商品[$name] 没有 benefitId，跳过")
-                            continue
+                    ExchangeSafety.AUTO -> {
+                        if (exchangeMemberPointBenefit(candidate)) {
+                            memberPointExchangeBenefitToday(candidate.item.id)
                         }
-                        // 记录 benefitId 映射关系
-                        IdMapManager.getInstance(MemberBenefitsMap::class.java).add(benefitId, name)
-                        // 校验是否在白名单
-                        val inWhiteList = whiteList.contains(benefitId)
-                        if (!inWhiteList) {
-                            // 如果不在白名单，保持安静，不刷 record 日志，或者你可以按需开启
-                            continue
-                        }
-                        remainingWhiteList?.remove(benefitId)
-                        // 校验频率限制
-                        if (!canMemberPointExchangeBenefitToday(benefitId)) {
-                            Log.member("跳过[$name]: 今日已兑换过")
-                            continue
-                        }
-                        // 5. 执行兑换
-                        Log.member("准备兑换[$name], ID: $benefitId, 需积分: $pointNeeded")
-                        if (exchangeBenefit(benefitId, itemId, userId)) {
-                            Log.member("会员积分🎐兑换[$name]#花费[$pointNeeded 积分]")
-                        } else {
-                            Log.member("兑换失败: $name (ItemId: $itemId)")
-                        }
-                    }
-                    val nextPageNum = jo.optInt("nextPageNum", 0)
-                    if (nextPageNum > 0 && nextPageNum > currentPage) {
-                        currentPage = nextPageNum
-                    } else {
-                        hasNextPage = false
-                    }
-
-                    if (remainingWhiteList != null && remainingWhiteList.isEmpty()) {
-                        IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-                        Log.member("会员积分🎐兑换列表已全部扫描到，提前结束")
-                        setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE)
-                        return
                     }
                 }
-                IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-                Log.member("分类[$catName]处理完毕，已执行中间保存")
             }
-            // 7. 保存映射表
-            IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-            Log.member("会员积分🎐全部分类任务处理完毕")
+            memberBenefitMap.save(userId)
+            if (candidateMap.isEmpty()) {
+                Log.member("会员积分🎐未获取到可兑换列表")
+            } else {
+                Log.member("会员积分🎐兑换列表刷新完成#${candidateMap.size}")
+            }
+            remainingSelectedIds
+                ?.filter { canMemberPointExchangeBenefitToday(it) }
+                ?.forEach { Log.member("会员积分🎐已勾选[$it]#本次列表未返回，保留配置不删除") }
             setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE)
 
         } catch (t: Throwable) {
@@ -776,27 +1009,218 @@ class AntMember : ModelTask() {
         }
     }
 
-    private fun exchangeBenefit(benefitId: String, itemid: String, userid: String?): Boolean {
-        try {
-            val resString = AntMemberRpcCall.exchangeBenefit(benefitId, itemid, userid)
-            val jo = JSONObject(resString)
-            val resultCode = jo.optString("resultCode")
-
-            if (resultCode == "BEYOND_BUYING_TIMES") {
-                Log.member("会员权益兑换已达上限，标记任务今日完成")
-                memberPointExchangeBenefitToday(benefitId)
-                return true
-            }
-
-            if (ResChecker.checkRes(TAG, "会员权益兑换失败:", jo)) {
-                memberPointExchangeBenefitToday(benefitId)
-                return true
-            }
-
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "exchangeBenefit 错误:", t)
+    private fun buildMemberExchangeCandidate(
+        benefit: JSONObject,
+        requestSourceInfo: String = "",
+        sourcePassMap: JSONObject? = null
+    ): MemberExchangeCandidate? {
+        val benefitId = benefit.optString("benefitId").trim()
+        val itemId = benefit.optString("itemId").trim()
+        val name = benefit.optString("name", benefit.optString("shortTitle", "未知权益")).trim()
+        if (benefitId.isEmpty()) {
+            Log.member("会员积分🎐商品[$name]没有 benefitId，跳过")
+            return null
         }
-        return false
+        val stableId = if (itemId.isEmpty()) benefitId else "$benefitId|$itemId"
+        val pricePresentation = benefit.optJSONObject("pricePresentation")
+        val pointNeeded = pricePresentation?.optString("point").orEmpty()
+            .ifEmpty { benefit.optJSONObject("pointPriceForDisplay")?.optString("minPoint").orEmpty() }
+        val yuan = pricePresentation?.optString("yuan").orEmpty()
+        val channelPrice = benefit.optString("channelPrice")
+        val nextQuantity = benefit.optInt("nextQuantity", -1)
+        val reserve = benefit.optInt("reserve", -1)
+        val reserveForDisplay = benefit.optString("reserveForDisplay")
+        val stockText = when {
+            nextQuantity > 0 -> "下轮库存$nextQuantity"
+            reserveForDisplay.isNotEmpty() -> "库存$reserveForDisplay"
+            reserve >= 0 -> "库存$reserve"
+            else -> ""
+        }
+        val validText = formatExchangeWindow(
+            benefit.optLong("nextExchangeStartTime", 0L).takeIf { it > 0L }
+                ?: benefit.optLong("exchangeStartDt", 0L),
+            benefit.optLong("nextExchangeEndTime", 0L).takeIf { it > 0L }
+                ?: benefit.optLong("exchangeEndDt", 0L)
+        )
+        val benefitMark = benefit.optString("benefitMark")
+        val itemSource = benefit.optString("itemSource")
+        val actionUrl = benefit.optString("actionUrl")
+        val extInfo = benefit.optJSONObject("extInfo")
+        val linkInfo = benefit.optJSONObject("linkInfo")
+        val statusParts = mutableListOf<String>()
+        val serverUsable = when {
+            benefit.has("usable") -> benefit.optBoolean("usable", false)
+            benefit.has("exchangeable") -> benefit.optBoolean("exchangeable", false)
+            else -> true
+        }
+        if (!serverUsable) {
+            statusParts.add("服务端不可兑")
+        }
+        if (nextQuantity == 0 && reserve <= 0) {
+            statusParts.add("库存不足")
+        }
+        if (benefit.optBoolean("needPartnerMember", false) || benefit.optBoolean("needCheckPartnerMember", false)) {
+            statusParts.add("需合作会员")
+        }
+        extInfo?.optString("labelContent")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { statusParts.add(it) }
+
+        val autoBenefitMark = benefitMark.equals("ONE_PARTY_VIRTUAL_ITEM", ignoreCase = true) &&
+            itemSource.equals("PROMO", ignoreCase = true)
+        val unsafeByMark = !autoBenefitMark
+        val (baseSafety, baseReason) = ExchangeSafetyRules.classify(
+            cashValues = listOf(channelPrice, yuan),
+            textValues = listOf(name, benefitMark, actionUrl, itemSource, extInfo?.toString(), linkInfo?.toString()),
+            defaultReason = "涉及实付或下单链路"
+        )
+        val safety = when {
+            statusParts.any { it == "服务端不可兑" || it == "库存不足" } -> ExchangeSafety.UNAVAILABLE
+            unsafeByMark -> ExchangeSafety.LOG_ONLY
+            baseSafety == ExchangeSafety.LOG_ONLY -> ExchangeSafety.LOG_ONLY
+            else -> ExchangeSafety.AUTO
+        }
+        val safetyReason = when {
+            safety == ExchangeSafety.UNAVAILABLE -> statusParts.firstOrNull { it == "服务端不可兑" || it == "库存不足" }.orEmpty()
+            unsafeByMark -> "非纯积分虚拟道具"
+            baseReason.isNotEmpty() -> baseReason
+            else -> ""
+        }
+        return MemberExchangeCandidate(
+            item = ExchangeItem(
+                id = stableId,
+                name = name.ifEmpty { stableId },
+                cost = ExchangeCost(
+                    pointText = pointNeeded.takeIf { it.isNotBlank() }?.let { "${it}积分" }.orEmpty(),
+                    cashText = yuan.takeIf { it.isNotBlank() && it != "0" }?.let { "${it}元" }
+                        ?: channelPrice.takeIf { it.isNotBlank() && it != "0" }?.let { "${it}元" }.orEmpty()
+                ),
+                limit = ExchangeLimit(
+                    statusText = statusParts.joinToString("、"),
+                    stockText = stockText,
+                    validText = validText
+                ),
+                safety = safety,
+                safetyReason = safetyReason
+            ),
+            benefitId = benefitId,
+            itemId = itemId,
+            pointNeeded = pointNeeded,
+            benefitMark = benefitMark,
+            itemSource = itemSource,
+            requestSourceInfo = requestSourceInfo,
+            sourcePassMap = sourcePassMap
+        )
+    }
+
+    private fun exchangeMemberPointBenefit(candidate: MemberExchangeCandidate): Boolean {
+        return try {
+            val detailResp = JSONObject(
+                AntMemberRpcCall.querySingleBenefitDetail(
+                    benefitId = candidate.benefitId,
+                    requestSourceInfo = candidate.requestSourceInfo,
+                    sourcePassMap = candidate.sourcePassMap
+                )
+            )
+            if (!ResChecker.checkRes(TAG, "会员积分权益详情查询失败:", detailResp)) {
+                return false
+            }
+            val detailCandidate = detailResp.optJSONObject("benefitDetail")
+                ?.let {
+                    buildMemberExchangeCandidate(
+                        it,
+                        requestSourceInfo = candidate.requestSourceInfo,
+                        sourcePassMap = candidate.sourcePassMap
+                    )
+                }
+                ?: candidate
+            if (detailCandidate.item.safety != ExchangeSafety.AUTO) {
+                Log.member("会员积分🎐详情复核跳过[${detailCandidate.item.displayName()}]#${detailCandidate.item.safetyReason}")
+                return false
+            }
+
+            val confirmResp = JSONObject(
+                AntMemberRpcCall.queryPromoBenefitOrderConfirmInfo(
+                    benefitId = detailCandidate.benefitId,
+                    requestSourceInfo = detailCandidate.requestSourceInfo,
+                    sourcePassMap = detailCandidate.sourcePassMap
+                )
+            )
+            if (!ResChecker.checkRes(TAG, "会员积分兑换确认失败:", confirmResp)) {
+                return false
+            }
+            val confirmedCandidate = confirmResp.optJSONObject("promoBenefitOrderConfirmInfo")
+                ?.let {
+                    buildMemberExchangeCandidate(
+                        it,
+                        requestSourceInfo = detailCandidate.requestSourceInfo,
+                        sourcePassMap = detailCandidate.sourcePassMap
+                    )
+                }
+                ?: detailCandidate
+            if (confirmedCandidate.item.safety != ExchangeSafety.AUTO) {
+                Log.member("会员积分🎐确认页复核跳过[${confirmedCandidate.item.displayName()}]#${confirmedCandidate.item.safetyReason}")
+                return false
+            }
+            if (confirmedCandidate.itemId.isBlank()) {
+                Log.member("会员积分🎐跳过[${confirmedCandidate.item.name}]#exchangeBenefit 缺少 itemId")
+                return false
+            }
+
+            val exchangeResp = JSONObject(
+                AntMemberRpcCall.exchangeMemberBenefit(
+                    benefitId = confirmedCandidate.benefitId,
+                    itemId = confirmedCandidate.itemId,
+                    requestSourceInfo = confirmedCandidate.requestSourceInfo,
+                    sourcePassMap = confirmedCandidate.sourcePassMap
+                )
+            )
+            if (!ResChecker.checkRes(TAG, "会员积分兑换失败:", exchangeResp)) {
+                Log.member("会员积分🎐兑换失败[${confirmedCandidate.item.name}]#$exchangeResp")
+                return false
+            }
+            val orderId = exchangeResp.optString("orderId")
+            Log.member("会员积分🎐兑换[${confirmedCandidate.item.name}]#消耗${confirmedCandidate.pointNeeded}积分")
+            if (orderId.isNotBlank()) {
+                runCatching {
+                    val orderResp = JSONObject(
+                        AntMemberRpcCall.querySingleExchangeOrderDetail(
+                            benefitId = confirmedCandidate.benefitId,
+                            bizType = confirmedCandidate.itemSource.ifBlank { "PROMO" },
+                            outBizNo = orderId,
+                            sourcePassMap = confirmedCandidate.sourcePassMap
+                        )
+                    )
+                    if (ResChecker.checkRes(TAG, "会员积分兑换结果查询失败:", orderResp)) {
+                        val detail = orderResp.optJSONObject("exchangeOrderDetailConfigInfo")
+                        val status = detail?.optString("orderStatus").orEmpty().ifEmpty {
+                            detail?.optString("status").orEmpty()
+                        }
+                        Log.member("会员积分🎐兑换结果[${confirmedCandidate.item.name}]#${status.ifBlank { "已提交" }}")
+                    }
+                }.onFailure {
+                    Log.printStackTrace(TAG, "exchangeMemberPointBenefit.queryOrderDetail err:", it)
+                }
+            }
+            true
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "exchangeMemberPointBenefit err:", t)
+            false
+        }
+    }
+
+    private fun formatExchangeWindow(startMillis: Long, endMillis: Long): String {
+        if (startMillis <= 0L && endMillis <= 0L) {
+            return ""
+        }
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        val startText = startMillis.takeIf { it > 0L }?.let { formatter.format(Date(it)) }.orEmpty()
+        val endText = endMillis.takeIf { it > 0L }?.let { formatter.format(Date(it)) }.orEmpty()
+        return when {
+            startText.isNotEmpty() && endText.isNotEmpty() -> "${startText}至${endText}"
+            startText.isNotEmpty() -> "${startText}起"
+            else -> "${endText}止"
+        }
     }
 
     /**
@@ -3889,53 +4313,213 @@ class AntMember : ModelTask() {
         }
     }
 
-    internal fun beanExchangeBubbleBoost() {
+    internal fun beanExchangeRight() {
         try {
-            // 检查RPC调用是否可用
-            try {
-                val accountInfo = AntMemberRpcCall.queryUserAccountInfo("INS_BLUE_BEAN")
-
-                var jo = JSONObject(accountInfo)
-                if (!ResChecker.checkRes(TAG, jo)) {
-                    Log.member(jo.toString())
-                    return
-                }
-
-                val userCurrentPoint = jo.getJSONObject("result").getInt("userCurrentPoint")
-
-                // 检查beanExchangeDetail调用
-                val exchangeDetailStr = AntMemberRpcCall.beanExchangeDetail("IT20230214000700069722")
-
-                jo = JSONObject(exchangeDetailStr)
-                if (!ResChecker.checkRes(TAG, jo)) {
-                    Log.member(jo.toString())
-                    return
-                }
-
-                jo = jo.getJSONObject("result").getJSONObject("rspContext").getJSONObject("params").getJSONObject("exchangeDetail")
-                val itemId = jo.getString("itemId")
-                val itemName = jo.getString("itemName")
-                jo = jo.getJSONObject("itemExchangeConsultDTO")
-                val realConsumePointAmount = jo.getInt("realConsumePointAmount")
-
-                if (!jo.getBoolean("canExchange") || realConsumePointAmount > userCurrentPoint) {
-                    return
-                }
-
-                val exchangeResult = AntMemberRpcCall.beanExchange(itemId, realConsumePointAmount)
-
-                jo = JSONObject(exchangeResult)
-                if (ResChecker.checkRes(TAG, jo)) {
-                    Log.member("安心豆🫘[兑换:$itemName]")
-                } else {
-                    Log.member(jo.toString())
-                }
-            } catch (e: NullPointerException) {
-                Log.printStackTrace(TAG, "安心豆🫘[RPC桥接失败]#可能是RpcBridge未初始化", e)
+            val selectedIds: Set<String> = beanExchangeRightList?.value
+                ?.filterNotNull()
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+            val userId = UserMap.currentUid
+            val candidateMap = queryBeanExchangeCandidates(queryBlueBeanBalance())
+            val beanRightMap = IdMapManager.getInstance(BeanExchangeRightMap::class.java)
+            if (candidateMap.isEmpty()) {
+                beanRightMap.save(userId)
+                Log.member("安心豆🫘未获取到可兑换权益列表")
+                return
             }
+            val remainingSelectedIds: MutableSet<String>? = if (selectedIds.isNotEmpty()) selectedIds.toMutableSet() else null
+            candidateMap.values.forEach { candidate ->
+                beanRightMap.add(candidate.item.id, candidate.item.displayName())
+                if (!selectedIds.contains(candidate.item.id)) {
+                    return@forEach
+                }
+                remainingSelectedIds?.remove(candidate.item.id)
+                when (candidate.item.safety) {
+                    ExchangeSafety.UNAVAILABLE -> {
+                        Log.member("安心豆🫘跳过[${candidate.item.displayName()}]#${candidate.item.safetyReason}")
+                    }
+                    ExchangeSafety.LOG_ONLY -> {
+                        Log.member("安心豆🫘已勾选[${candidate.item.displayName()}]#仅提醒，不自动兑换")
+                    }
+                    ExchangeSafety.AUTO -> {
+                        val detailResp = JSONObject(AntMemberRpcCall.queryRightsDetail(candidate.rightsId))
+                        if (!ResChecker.checkRes(TAG, "安心豆权益详情查询失败:", detailResp)) {
+                            Log.member("安心豆🫘兑换前详情校验失败[${candidate.item.name}]")
+                            return@forEach
+                        }
+                        val exchangeResult = JSONObject(
+                            AntMemberRpcCall.rightsExchange(candidate.rightsId, candidate.assetAmount, candidate.needOrder)
+                        )
+                        if (ResChecker.checkRes(TAG, "安心豆权益兑换失败:", exchangeResult)) {
+                            Log.member("安心豆🫘兑换[${candidate.item.name}]#消耗${candidate.assetAmount}安心豆")
+                        } else {
+                            Log.member("安心豆🫘兑换失败[${candidate.item.name}]#$exchangeResult")
+                        }
+                    }
+                }
+            }
+            beanRightMap.save(userId)
+            remainingSelectedIds
+                ?.forEach { Log.member("安心豆🫘已勾选[$it]#本次列表未返回，保留配置不删除") }
+            Log.member("安心豆🫘兑换列表刷新完成#${candidateMap.size}")
         } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "beanExchangeBubbleBoost err:", t)
+            Log.printStackTrace(TAG, "beanExchangeRight err:", t)
         }
+    }
+
+    private fun addBeanExchangeCandidates(
+        response: JSONObject,
+        candidateMap: MutableMap<String, BeanExchangeCandidate>,
+        fromHistory: Boolean,
+        beanBalance: Int?
+    ) {
+        val result = extractBeanExchangeResult(response)
+        val arrays = listOfNotNull(
+            result.optJSONArray("preExchangeDetailList"),
+            result.optJSONArray("couponRightsDTOList"),
+            result.optJSONArray("rightsList"),
+            result.optJSONArray("flowList")
+        )
+        arrays.forEach { array ->
+            for (i in 0 until array.length()) {
+                val candidate = buildBeanExchangeCandidate(array.optJSONObject(i) ?: continue, fromHistory, beanBalance) ?: continue
+                val existing = candidateMap[candidate.item.id]
+                if (fromHistory && existing != null) {
+                    continue
+                }
+                candidateMap[candidate.item.id] = candidate
+            }
+        }
+    }
+
+    private fun extractBeanExchangeResult(response: JSONObject): JSONObject {
+        return response.optJSONObject("result")
+            ?: response.optJSONObject("data")?.optJSONObject("result")
+            ?: response.optJSONObject("data")
+            ?: response
+    }
+
+    private fun queryBlueBeanBalance(): Int? {
+        return runCatching {
+            val accountInfo = JSONObject(AntMemberRpcCall.queryUserAccountInfo("INS_BLUE_BEAN"))
+            if (!ResChecker.checkRes(TAG, accountInfo)) {
+                return@runCatching null
+            }
+            val result = accountInfo.optJSONObject("result") ?: return@runCatching null
+            result.optInt("userCurrentPoint", -1)
+                .takeIf { it >= 0 }
+                ?: result.optJSONObject("accountPoint")?.optInt("userCurrentPoint", -1)?.takeIf { it >= 0 }
+        }.onFailure {
+            Log.printStackTrace(TAG, "queryBlueBeanBalance err:", it)
+        }.getOrNull()
+    }
+
+    private fun buildBeanExchangeCandidate(raw: JSONObject, fromHistory: Boolean, beanBalance: Int?): BeanExchangeCandidate? {
+        val rightsId = sequenceOf(
+            raw.optString("rightsId"),
+            raw.optString("rightsCode"),
+            raw.optString("itemId"),
+            raw.optString("id")
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+        if (rightsId.isEmpty()) {
+            return null
+        }
+        val name = sequenceOf(
+            raw.optString("title"),
+            raw.optString("simpleTitle"),
+            raw.optString("rightsName"),
+            raw.optString("itemName"),
+            raw.optString("prizeName")
+        ).firstOrNull { it.isNotBlank() } ?: rightsId
+        val cash = raw.optString("cash")
+        val pointNum = raw.optString("pointNum")
+        val status = raw.optString("status")
+        val rightsUseLink = raw.optString("rightsUseLink", raw.optString("jumpUrl"))
+        val showType = raw.optString("showType")
+        val needOrder = when {
+            raw.has("needOrder") -> raw.optInt("needOrder", -1)
+            raw.optJSONObject("exchangeRequest")?.has("needOrder") == true ->
+                raw.optJSONObject("exchangeRequest")?.optInt("needOrder", -1) ?: -1
+            else -> 0
+        }
+        val assetAmount = when {
+            raw.has("assetAmount") -> raw.optInt("assetAmount", -1)
+            raw.optJSONObject("exchangeRequest")?.has("assetAmount") == true ->
+                raw.optJSONObject("exchangeRequest")?.optInt("assetAmount", -1) ?: -1
+            pointNum.toIntOrNull() != null -> pointNum.toInt()
+            else -> -1
+        }
+        val statusParts = mutableListOf<String>()
+        if (fromHistory) {
+            statusParts.add("已兑换记录")
+        }
+        if (status.isNotBlank()) {
+            statusParts.add(status)
+        }
+        raw.optString("exchangeTotalNum")
+            .takeIf { it.isNotBlank() }
+            ?.let { statusParts.add("已兑$it") }
+        raw.optInt("lackPointNum", 0)
+            .takeIf { it > 0 }
+            ?.let { statusParts.add("安心豆不足$it") }
+        val balanceNotEnough = beanBalance != null && assetAmount > beanBalance
+        if (balanceNotEnough) {
+            statusParts.add("安心豆不足")
+        }
+
+        val unavailable = fromHistory ||
+            status.equals("WAIT_EFFECTIVE", true) ||
+            status.equals("INVALID", true) ||
+            status.equals("USED", true) ||
+            raw.optInt("lackPointNum", 0) > 0 ||
+            balanceNotEnough
+        val unsafeByType = showType.equals("GOODS", true) ||
+            showType.equals("CASH", true) ||
+            (showType.isNotBlank() && !showType.equals("OTHER", true))
+        val (baseSafety, baseReason) = ExchangeSafetyRules.classify(
+            cashValues = listOf(cash),
+            textValues = listOf(name, showType, rightsUseLink, raw.optString("supplyType"), raw.toString()),
+            defaultReason = "涉及实付、外跳或下单链路"
+        )
+        val paramsComplete = assetAmount > 0 && needOrder == 0
+        val safety = when {
+            unavailable -> ExchangeSafety.UNAVAILABLE
+            unsafeByType -> ExchangeSafety.LOG_ONLY
+            baseSafety == ExchangeSafety.LOG_ONLY -> ExchangeSafety.LOG_ONLY
+            !paramsComplete -> ExchangeSafety.LOG_ONLY
+            else -> ExchangeSafety.AUTO
+        }
+        val safetyReason = when {
+            unavailable -> when {
+                fromHistory -> "已兑换记录"
+                balanceNotEnough || raw.optInt("lackPointNum", 0) > 0 -> "安心豆不足"
+                else -> statusParts.firstOrNull().orEmpty().ifEmpty { "服务端状态不可兑换" }
+            }
+            unsafeByType -> "商品/现金/券类权益需手动处理"
+            baseReason.isNotEmpty() -> baseReason
+            !paramsComplete -> "rightsExchange 参数不完整"
+            else -> ""
+        }
+        return BeanExchangeCandidate(
+            item = ExchangeItem(
+                id = rightsId,
+                name = name,
+                cost = ExchangeCost(
+                    pointText = pointNum.takeIf { it.isNotBlank() }?.let { "${it}安心豆" }.orEmpty(),
+                    cashText = cash.takeIf { it.isNotBlank() && it != "0" }?.let { "${it}元" }.orEmpty()
+                ),
+                limit = ExchangeLimit(
+                    statusText = statusParts.joinToString("、")
+                ),
+                safety = safety,
+                safetyReason = safetyReason
+            ),
+            rightsId = rightsId,
+            assetAmount = assetAmount,
+            needOrder = needOrder
+        )
     }
 
 
@@ -5023,4 +5607,3 @@ class AntMember : ModelTask() {
     }
 
 }
-

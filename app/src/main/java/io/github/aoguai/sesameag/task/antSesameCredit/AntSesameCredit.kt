@@ -7,6 +7,7 @@ import io.github.aoguai.sesameag.data.Status.Companion.setFlagToday
 import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.entity.SesameGift
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.hook.internal.LocationHelper.requestLocationSuspend
 import io.github.aoguai.sesameag.hook.internal.SecurityBodyHelper.getSecurityBodyData
 import io.github.aoguai.sesameag.model.ModelFields
@@ -16,6 +17,11 @@ import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.antOrchard.AntOrchardRpcCall.orchardSpreadManure
+import io.github.aoguai.sesameag.task.exchange.ExchangeCost
+import io.github.aoguai.sesameag.task.exchange.ExchangeItem
+import io.github.aoguai.sesameag.task.exchange.ExchangeLimit
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafety
+import io.github.aoguai.sesameag.task.exchange.ExchangeSafetyRules
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.Log
@@ -34,7 +40,10 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.text.SimpleDateFormat
 import java.net.URLDecoder
+import java.util.Date
+import java.util.Locale
 import java.util.Objects
 import java.util.regex.Pattern
 import kotlin.math.max
@@ -61,6 +70,12 @@ class AntSesameCredit : ModelTask() {
         val title: String,
         val creditFeedbackId: String,
         val potentialSize: String
+    )
+
+    private data class SesameExchangeCandidate(
+        val item: ExchangeItem,
+        val templateId: String,
+        val pointNeeded: String
     )
 
     private data class SesameTaskBatchResult(
@@ -141,6 +156,7 @@ class AntSesameCredit : ModelTask() {
                 "芝麻粒 | 兑换列表",
                 LinkedHashSet<String?>()
             ) {
+                refreshSesameGrainExchangeOptionsForSettings()
                 SesameGift.getList()
             }.withDesc("勾选允许自动兑换的芝麻粒商品，需开启“芝麻粒 | 兑换道具”。").also { sesameGrainExchangeList = it })
         // 芝麻炼金
@@ -2784,11 +2800,74 @@ class AntSesameCredit : ModelTask() {
         }
 
     }
-
+    
     /**
      * 芝麻粒兑换道具
      * 仿照会员积分兑换逻辑：遍历列表更新Map，同时匹配用户设置进行兑换
      */
+    private fun refreshSesameGrainExchangeOptionsForSettings() {
+        if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid)) {
+            Log.sesame("芝麻粒兑换🛒目标应用未启动，设置页使用缓存列表")
+            return
+        }
+        try {
+            val userId = UserMap.currentUid
+            val maxPage = 10
+            val pageSize = 20
+            val pendingTabs = mutableListOf<String?>(null)
+            val scannedTabs = LinkedHashSet<String>()
+            val seenTemplateIds = LinkedHashSet<String>()
+            val sesameGiftMap = IdMapManager.getInstance(SesameGiftMap::class.java)
+            var tabIndex = 0
+            var refreshedCount = 0
+            while (tabIndex < pendingTabs.size) {
+                val tab = pendingTabs[tabIndex++]
+                val tabKey = tab ?: ""
+                if (!scannedTabs.add(tabKey)) {
+                    continue
+                }
+                var currentPage = 1
+                var hasNextPage = true
+                while (hasNextPage && currentPage <= maxPage) {
+                    val jo = JSONObject(AntSesameCreditRpcCall.queryExchangeList(currentPage, pageSize, tab))
+                    if (!ResChecker.checkRes(TAG, jo)) {
+                        break
+                    }
+                    val data = jo.optJSONObject("data") ?: break
+                    val tabList = data.optJSONArray("tabList")
+                    if (tabList != null) {
+                        for (i in 0 until tabList.length()) {
+                            val discoveredTab = tabList.optJSONObject(i)?.optString("tab").orEmpty()
+                                .ifEmpty { tabList.optString(i) }
+                            if (discoveredTab.isNotBlank() &&
+                                discoveredTab != "all" &&
+                                !scannedTabs.contains(discoveredTab) &&
+                                !pendingTabs.contains(discoveredTab)
+                            ) {
+                                pendingTabs.add(discoveredTab)
+                            }
+                        }
+                    }
+                    val list = data.optJSONArray("awardTemplateList") ?: break
+                    for (i in 0 until list.length()) {
+                        val candidate = buildSesameExchangeCandidate(list.optJSONObject(i) ?: continue) ?: continue
+                        if (!seenTemplateIds.add(candidate.item.id)) {
+                            continue
+                        }
+                        sesameGiftMap.add(candidate.item.id, candidate.item.displayName())
+                        refreshedCount++
+                    }
+                    hasNextPage = data.optBoolean("hasNext", false)
+                    currentPage++
+                }
+            }
+            sesameGiftMap.save(userId)
+            Log.sesame("芝麻粒兑换🛒设置页刷新列表#$refreshedCount")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "refreshSesameGrainExchangeOptionsForSettings err:", t)
+        }
+    }
+
     internal suspend fun doSesameGrainExchange(): Unit = CoroutineUtils.run {
         // 每日只运行一次，避免重复请求
         if (hasFlagToday(StatusFlags.FLAG_SESAME_GRAIN_EXCHANGE_DONE)) {
@@ -2797,67 +2876,194 @@ class AntSesameCredit : ModelTask() {
 
         try {
             val userId = UserMap.currentUid
-            // 获取用户在配置中选中的商品ID列表（白名单）
-            val targetIds = sesameGrainExchangeList?.value ?: emptySet()
-            var currentPage = 1
-            // 限制最大页数，防止无限循环（抓包看大概也就3-5页）
+            val targetIds: Set<String> = sesameGrainExchangeList?.value
+                ?.filterNotNull()
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
             val maxPage = 10
-            val pageSize = 99 //适当调整pageSize 减少请求
-            var hasNextPage = true
+            val pageSize = 20
+            val pendingTabs = mutableListOf<String?>(null)
+            val scannedTabs = LinkedHashSet<String>()
+            val seenTemplateIds = LinkedHashSet<String>()
+            val remainingTargetIds: MutableSet<String>? = if (targetIds.isNotEmpty()) targetIds.toMutableSet() else null
+            val sesameGiftMap = IdMapManager.getInstance(SesameGiftMap::class.java)
+            var tabIndex = 0
+            var refreshedCount = 0
 
-            while (hasNextPage && currentPage <= maxPage) {
-                // 稍微延时，避免请求过快被风控
-                GlobalThreadPools.sleepCompat(1500L)
-                // 调用 RPC 获取列表
-                val jo = JSONObject(AntSesameCreditRpcCall.queryExchangeList(currentPage, pageSize))
-//                所有的请求使用这个类方法检查过滤就行了
-                if (!ResChecker.checkRes(TAG, jo)) {//一次失败直接return不要break
-                    Log.error(TAG, "芝麻粒商品列表校验失败: $jo")
-                    return@run
+            while (tabIndex < pendingTabs.size) {
+                val tab = pendingTabs[tabIndex++]
+                val tabKey = tab ?: ""
+                if (!scannedTabs.add(tabKey)) {
+                    continue
                 }
-
-                val data = jo.optJSONObject("data") ?: return@run //没数据也return
-                val list = data.optJSONArray("awardTemplateList") ?: return@run
-
-                // 遍历当前页的商品
-                for (i in 0 until list.length()) {
-                    val item = list.getJSONObject(i)
-                    val name = item.optString("awardName", "未知商品")
-                    val id = item.optString("awardTemplateId")
-                    val pointNeeded = item.optString("point", "0")
-                    val remainingBudget = item.optInt("remainingBudget", 0) // 库存
-                    if (id.isEmpty()) continue
-                    // 1. 核心步骤：记录 ID 和 名称 的映射关系
-                    // 这样下次进入设置界面，就能看到中文名称了
-                    IdMapManager.getInstance(SesameGiftMap::class.java).add(id, name)
-                    // 2. 检查是否在用户的待兑换列表里（白名单）
-                    val inWhiteList = targetIds.contains(id)
-                    if (!inWhiteList) {
-                        // 如果没勾选，就跳过，不做处理
-                        continue
+                var currentPage = 1
+                var hasNextPage = true
+                while (hasNextPage && currentPage <= maxPage) {
+                    GlobalThreadPools.sleepCompat(1500L)
+                    val jo = JSONObject(AntSesameCreditRpcCall.queryExchangeList(currentPage, pageSize, tab))
+                    if (!ResChecker.checkRes(TAG, jo)) {
+                        Log.error(TAG, "芝麻粒商品列表校验失败: $jo")
+                        break
                     }
-                    // 3. 检查库存
-                    if (remainingBudget <= 0) {
-                        Log.sesame("跳过[$name]: 库存不足")
-                        continue
+
+                    val data = jo.optJSONObject("data") ?: break
+                    val tabList = data.optJSONArray("tabList")
+                    if (tabList != null) {
+                        for (i in 0 until tabList.length()) {
+                            val discoveredTab = tabList.optJSONObject(i)?.optString("tab").orEmpty()
+                                .ifEmpty { tabList.optString(i) }
+                            if (discoveredTab.isNotBlank() &&
+                                discoveredTab != "all" &&
+                                !scannedTabs.contains(discoveredTab) &&
+                                !pendingTabs.contains(discoveredTab)
+                            ) {
+                                pendingTabs.add(discoveredTab)
+                            }
+                        }
                     }
-                    // 4. 执行兑换 (这里不加每日限制判断了，只要有库存且勾选了就尝试兑换)
-                    Log.sesame("准备兑换[$name], ID: $id, 需芝麻粒: $pointNeeded")
-                    exchangeSesameGift(id, name, pointNeeded)
+                    val list = data.optJSONArray("awardTemplateList") ?: break
+                    for (i in 0 until list.length()) {
+                        val candidate = buildSesameExchangeCandidate(list.optJSONObject(i) ?: continue) ?: continue
+                        sesameGiftMap.add(candidate.item.id, candidate.item.displayName())
+                        if (!seenTemplateIds.add(candidate.item.id)) {
+                            continue
+                        }
+                        refreshedCount++
+                        if (!targetIds.contains(candidate.item.id)) {
+                            continue
+                        }
+                        remainingTargetIds?.remove(candidate.item.id)
+                        when (candidate.item.safety) {
+                            ExchangeSafety.UNAVAILABLE -> {
+                                Log.sesame("芝麻粒兑换🛒跳过[${candidate.item.displayName()}]#${candidate.item.safetyReason}")
+                            }
+                            ExchangeSafety.LOG_ONLY -> {
+                                Log.sesame("芝麻粒兑换🛒已勾选[${candidate.item.displayName()}]#仅提醒，不自动兑换")
+                            }
+                            ExchangeSafety.AUTO -> {
+                                Log.sesame("芝麻粒兑换🛒准备兑换[${candidate.item.name}]#消耗${candidate.pointNeeded}粒")
+                                exchangeSesameGift(candidate.templateId, candidate.item.name, candidate.pointNeeded)
+                            }
+                        }
+                    }
+                    hasNextPage = data.optBoolean("hasNext", false)
+                    currentPage++
                 }
-                // 判断是否有下一页
-                hasNextPage = data.optBoolean("hasNext", false)
-                currentPage++
             }
 
-            // 保存映射关系到本地文件 sesame_gift.json
-            IdMapManager.getInstance(SesameGiftMap::class.java).save(userId)
-            Log.sesame("芝麻粒兑换任务处理完毕，商品列表已更新")
-            // 标记今日已完成
+            sesameGiftMap.save(userId)
+            remainingTargetIds
+                ?.forEach { Log.sesame("芝麻粒兑换🛒已勾选[$it]#本次列表未返回，保留配置不删除") }
+            Log.sesame("芝麻粒兑换列表刷新完成#$refreshedCount")
             setFlagToday(StatusFlags.FLAG_SESAME_GRAIN_EXCHANGE_DONE)
 
         } catch (t: Throwable) {//这里
             Log.printStackTrace(TAG, "doSesameGrainExchange 运行异常:", t)
+        }
+    }
+
+    private fun buildSesameExchangeCandidate(item: JSONObject): SesameExchangeCandidate? {
+        val templateId = item.optString("awardTemplateId").trim()
+        if (templateId.isEmpty()) {
+            return null
+        }
+        val name = item.optString("awardName", "未知商品")
+        val extInfo = item.optJSONObject("extInfo")
+        val pointNeeded = item.optString("point", item.optString("rawPoint", "0"))
+        val tabLabel = item.optString("awardTabLabel", extInfo?.optString("awardTabLabel").orEmpty())
+        val remainingBudget = item.optInt("remainingBudget", 0)
+        val validType = extInfo?.optString("validType").orEmpty()
+        val sendStart = item.optLong("sendStartTime", 0L)
+        val sendEnd = item.optLong("sendEndTime", 0L)
+        val now = System.currentTimeMillis()
+        val statusParts = mutableListOf<String>()
+        if (item.optBoolean("hasTaken", false)) {
+            statusParts.add("已领取")
+        }
+        if (item.optBoolean("hasFinished", false)) {
+            statusParts.add("已完成")
+        }
+        if (remainingBudget <= 0) {
+            statusParts.add("库存不足")
+        }
+        if (tabLabel.isNotBlank()) {
+            statusParts.add(tabLabel)
+        }
+        if (validType.isNotBlank()) {
+            statusParts.add("有效期:$validType")
+        }
+        val notStarted = sendStart > 0L && now < sendStart
+        val ended = sendEnd > 0L && now > sendEnd
+        if (notStarted) {
+            statusParts.add("未到兑换时间")
+        }
+        if (ended) {
+            statusParts.add("兑换已结束")
+        }
+        val awardShouldKnow = extInfo?.optString("awardShouldKnow").orEmpty()
+        val toUseAddress = extInfo?.optString("toUseAddress").orEmpty()
+        val awardTabLabel = extInfo?.optString("awardTabLabel", tabLabel).orEmpty()
+        val unavailable = item.optBoolean("hasTaken", false) ||
+            item.optBoolean("hasFinished", false) ||
+            remainingBudget <= 0 ||
+            notStarted ||
+            ended
+        val unsafeByTab = tabLabel.equals("ONLINE_SHOPPING", true) ||
+            awardTabLabel.equals("ONLINE_SHOPPING", true)
+        val (baseSafety, baseReason) = ExchangeSafetyRules.classify(
+            textValues = listOf(
+                name,
+                item.optString("awardProdType"),
+                tabLabel,
+                awardTabLabel,
+                toUseAddress,
+                awardShouldKnow
+            ),
+            defaultReason = "涉及实付、下单或收货链路"
+        )
+        val safety = when {
+            unavailable -> ExchangeSafety.UNAVAILABLE
+            unsafeByTab -> ExchangeSafety.LOG_ONLY
+            baseSafety == ExchangeSafety.LOG_ONLY -> ExchangeSafety.LOG_ONLY
+            else -> ExchangeSafety.AUTO
+        }
+        val safetyReason = when {
+            unavailable -> statusParts.firstOrNull().orEmpty().ifEmpty { "服务端状态不可兑换" }
+            unsafeByTab -> "网购权益需手动处理"
+            baseReason.isNotEmpty() -> baseReason
+            else -> ""
+        }
+        return SesameExchangeCandidate(
+            item = ExchangeItem(
+                id = templateId,
+                name = name,
+                cost = ExchangeCost(pointText = "${pointNeeded}芝麻粒"),
+                limit = ExchangeLimit(
+                    stockText = "库存$remainingBudget",
+                    validText = formatSesameExchangeWindow(sendStart, sendEnd),
+                    statusText = statusParts.joinToString("、")
+                ),
+                safety = safety,
+                safetyReason = safetyReason
+            ),
+            templateId = templateId,
+            pointNeeded = pointNeeded
+        )
+    }
+
+    private fun formatSesameExchangeWindow(startMillis: Long, endMillis: Long): String {
+        if (startMillis <= 0L && endMillis <= 0L) {
+            return ""
+        }
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        val startText = startMillis.takeIf { it > 0L }?.let { formatter.format(Date(it)) }.orEmpty()
+        val endText = endMillis.takeIf { it > 0L }?.let { formatter.format(Date(it)) }.orEmpty()
+        return when {
+            startText.isNotEmpty() && endText.isNotEmpty() -> "${startText}至${endText}"
+            startText.isNotEmpty() -> "${startText}起"
+            else -> "${endText}止"
         }
     }
 
@@ -2866,18 +3072,42 @@ class AntSesameCredit : ModelTask() {
      */
     private fun exchangeSesameGift(templateId: String, name: String, point: String): Boolean {
         try {
-            // 调用兑换接口
+            val detailResp = JSONObject(AntSesameCreditRpcCall.queryAwardDetail(templateId))
+            if (!ResChecker.checkRes(TAG, "芝麻粒兑换详情查询失败:", detailResp)) {
+                return false
+            }
+            val detailCandidate = detailResp.optJSONObject("data")
+                ?.optJSONObject("awardTemplateVO")
+                ?.let { buildSesameExchangeCandidate(it) }
+            if (detailCandidate == null) {
+                Log.sesame("芝麻粒兑换🛒跳过[$name]#详情缺少 awardTemplateVO")
+                return false
+            }
+            if (detailCandidate.item.safety != ExchangeSafety.AUTO) {
+                Log.sesame("芝麻粒兑换🛒详情复核跳过[${detailCandidate.item.displayName()}]#${detailCandidate.item.safetyReason}")
+                return false
+            }
+
             val resString = AntSesameCreditRpcCall.obtainAward(templateId)
             val jo = JSONObject(resString)
 
-            // 检查结果
             if (ResChecker.checkRes(TAG, jo)) {
-                val recordId = jo.optJSONObject("data")?.optString("awardRecordId", "")
-                Log.sesame("芝麻粒兑换🛒[成功] $name #消耗${point}粒")
+                val recordId = jo.optJSONObject("data")?.optString("awardRecordId", "").orEmpty()
+                Log.sesame("芝麻粒兑换🛒[成功] ${detailCandidate.item.name} #消耗${point}粒")
+                if (recordId.isNotBlank()) {
+                    runCatching {
+                        val awardDetail = JSONObject(AntSesameCreditRpcCall.queryMyAwardDetail(recordId))
+                        if (ResChecker.checkRes(TAG, "芝麻粒兑换结果查询失败:", awardDetail)) {
+                            val awardStatus = awardDetail.optJSONObject("data")?.optString("status").orEmpty()
+                            Log.sesame("芝麻粒兑换🛒结果[${detailCandidate.item.name}]#${awardStatus.ifBlank { "已领取" }}")
+                        }
+                    }.onFailure {
+                        Log.printStackTrace(TAG, "exchangeSesameGift.queryMyAwardDetail err:", it)
+                    }
+                }
                 return true
             } else {
                 val errorMsg = jo.optString("resultView", resString)
-                // 如果是“积分不足”等错误，也会在这里打印
                 Log.error(TAG, "兑换失败[$name]: $errorMsg")
             }
         } catch (t: Throwable) {
