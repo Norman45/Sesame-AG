@@ -239,6 +239,7 @@ private val dodoDefaultBlacklist = emptySet<String>()
 
 private val memberDefaultBlacklist = setOf(
     // 会员
+    "SYH_RTB_SHOW_TASK_INDEX_1",
     "逛淘宝签到领现金",
     "逛一逛淘宝芭芭农场",
     "逛百度天天领现金",

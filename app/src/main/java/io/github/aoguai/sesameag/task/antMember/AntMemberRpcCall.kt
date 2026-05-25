@@ -222,10 +222,27 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
-    fun produce(actionCode: String): String {
+    fun produce(actionCode: String, channel: String? = null): String {
+        val args = JSONObject().apply {
+            put("actionCode", actionCode)
+            if (!channel.isNullOrBlank()) {
+                put("channel", channel)
+            }
+        }
         return RequestManager.requestString(
             "alipay.mrchservbase.biz.task.action.produce",
-            """[{"actionCode":"$actionCode"}]"""
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun merchantExamPage(taskCode: String): String {
+        val args = JSONObject().apply {
+            put("taskCode", taskCode)
+        }
+        return RequestManager.requestString(
+            "alipay.mrchservbase.business.exam.page",
+            JSONArray().put(args).toString()
         )
     }
 

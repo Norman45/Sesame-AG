@@ -95,7 +95,6 @@ class AntSports : ModelTask() {
 
         /** @brief 步数同步子任务 ID，用于避免同一天重复排队 */
         private const val SYNC_STEP_CHILD_TASK_ID = "syncStep"
-        private const val MOTION_DAILY_QUIZ_DONE_FLAG = "AntSports::motionDailyQuizDone"
         private const val MOTION_DAILY_QUIZ_REWARD_TASK_ID = "QUIZ_ANSWER_ENERGY_BALL_TASK"
 
         private const val RPC_WALK_QUERY_PATH = "com.alipay.sportsplay.biz.rpc.walk.queryPath"
@@ -630,7 +629,7 @@ class AntSports : ModelTask() {
             if (sportsTasksField.value == true &&
                 (
                     !Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE) ||
-                        !Status.hasFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)
+                        !Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_MOTION_DAILY_QUIZ_DONE)
                 )
             ) {
                 sportsTasks()
@@ -1455,7 +1454,7 @@ class AntSports : ModelTask() {
     }
 
     private fun motionDailyQuiz() {
-        if (Status.hasFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)) {
+        if (Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_MOTION_DAILY_QUIZ_DONE)) {
             return
         }
         try {
@@ -1542,7 +1541,7 @@ class AntSports : ModelTask() {
     }
 
     private fun markMotionDailyQuizDone(reason: String) {
-        Status.setFlagToday(MOTION_DAILY_QUIZ_DONE_FLAG)
+        Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_MOTION_DAILY_QUIZ_DONE)
         Log.sports("运动问答[$reason]，今日不再重复处理")
     }
 
@@ -5815,6 +5814,7 @@ class AntSports : ModelTask() {
                 if (signInfo != null && signInfo.optBoolean("signedToday", false)) {
                     Log.sports("今日已签到 ✔ 连续：${signInfo.optInt("continuitySignedDayCount")} 天"
                     )
+                    Status.setFlagToday(StatusFlags.FLAG_NEVERLAND_SIGN_DONE)
                     return
                 }
 
@@ -5825,8 +5825,12 @@ class AntSports : ModelTask() {
                     !ResChecker.checkRes(TAG, signRes) ||
                     signRes.optJSONObject("data") == null
                 ) {
+                    val errorCode = signRes.optString("errorCode", "")
+                    val errorMsg = signRes.optString("errorMsg", "")
+                    if ("ALREADY_SIGN_IN" == errorCode || "已签到" == errorMsg) {
+                        Status.setFlagToday(StatusFlags.FLAG_NEVERLAND_SIGN_DONE)
+                    }
                     Log.error(TAG, "takeSign raw=$signRes")
-                    Status.setFlagToday(StatusFlags.FLAG_NEVERLAND_SIGN_DONE)
                     return
                 }
 

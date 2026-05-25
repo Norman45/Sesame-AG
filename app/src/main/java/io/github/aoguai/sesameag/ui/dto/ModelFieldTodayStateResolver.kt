@@ -5,6 +5,7 @@ import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.model.ModelField
 import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.modelFieldExt.FriendSelectionCountModelField
+import io.github.aoguai.sesameag.util.maps.UserMap
 
 /**
  * 配置项在“今日状态”维度上的展示结果。
@@ -124,7 +125,7 @@ object ModelFieldTodayStateResolver {
                 flag(StatusFlags.FLAG_ANTMEMBER_INSURED_GOLD_DONE, "今日蚂蚁保保障金已处理")
 
             "AntSesameCredit.sesameTask" ->
-                flag(StatusFlags.FLAG_SESAME_DO_ALL_AVAILABLE_TASK, "今日芝麻信用任务已处理")
+                sesameTaskState()
 
             "AntSesameCredit.collectSesame",
             "AntSesameCredit.collectSesameWithOneClick" ->
@@ -142,6 +143,9 @@ object ModelFieldTodayStateResolver {
 
             "AntMember.merchantSign" ->
                 flag(StatusFlags.FLAG_ANTMEMBER_MERCHANT_SIGN_DONE, "今日商家签到已处理")
+
+            "AntMember.merchantMoreTask" ->
+                flag(StatusFlags.FLAG_ANTMEMBER_MERCHANT_MORE_TASK_DONE, "今日商家积分任务已处理")
 
             "AntMember.merchantKmdk" ->
                 allFlags(
@@ -165,7 +169,11 @@ object ModelFieldTodayStateResolver {
                 flag(StatusFlags.FLAG_ANTMEMBER_STICKER, "今日贴纸已领取")
 
             "AntSports.sportsTasks" ->
-                flag(StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE, "今日运动任务已完成")
+                allFlags(
+                    StatusFlags.FLAG_ANTSPORTS_DAILY_TASKS_DONE,
+                    StatusFlags.FLAG_ANTSPORTS_MOTION_DAILY_QUIZ_DONE,
+                    reason = "今日运动任务和问答已处理"
+                )
 
             "AntSports.syncStepCount" ->
                 if ((intValue(modelField) ?: 0) > 0) {
@@ -181,6 +189,14 @@ object ModelFieldTodayStateResolver {
             "AntSports.neverlandGrid",
             "AntSports.neverlandGridStepCount" ->
                 neverlandGridState(modelFields)
+
+            "AntSports.neverlandTask" ->
+                allFlags(
+                    StatusFlags.FLAG_NEVERLAND_SIGN_DONE,
+                    StatusFlags.FLAG_ANTSPORTS_TASK_CENTER_DONE,
+                    StatusFlags.FLAG_NEVERLAND_LIGHT_FEEDS_DONE,
+                    reason = "今日健康岛任务已处理"
+                )
 
             "AntSports.neverlandAutoReward",
             "AntSports.neverlandPreferMedal" ->
@@ -244,7 +260,11 @@ object ModelFieldTodayStateResolver {
 
             "AntFarm.enableChouchoule",
             "AntFarm.chouChouLeTrigger" ->
-                flag(StatusFlags.FLAG_FARM_CHOUCHOULE_FINISHED, "今日小鸡抽抽乐已处理")
+                allFlags(
+                    StatusFlags.FLAG_FARM_CHOUCHOULE_FINISHED,
+                    StatusFlags.FLAG_FARM_MULTI_STAGE_TASK_FINISHED,
+                    reason = "今日小鸡抽抽乐和多阶段任务已处理"
+                )
 
             "AntFarm.recordFarmGame",
             "AntFarm.farmGameTrigger" ->
@@ -274,6 +294,12 @@ object ModelFieldTodayStateResolver {
             "AntFarm.donationCompetitionSpecialFoodCount" ->
                 donationCompetitionSpecialFoodLimitState(modelFields)
 
+            "AntFarm.donation" ->
+                farmDonationState()
+
+            "AntFarm.receiveDonationCompetitionAward" ->
+                flag(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED, "今日捐蛋排位赛奖励已处理")
+
             "AntFarm.signRegardless" ->
                 flag(StatusFlags.FLAG_FARM_SIGNED, "今日庄园签到已处理")
 
@@ -294,6 +320,18 @@ object ModelFieldTodayStateResolver {
             inactive(reason)
         } else {
             ModelFieldTodayState()
+        }
+    }
+
+    private fun sesameTaskState(): ModelFieldTodayState {
+        return when {
+            Status.hasFlagToday(StatusFlags.FLAG_SESAME_DO_ALL_AVAILABLE_TASK) ->
+                inactive("今日芝麻信用任务已处理")
+
+            Status.hasFlagToday(StatusFlags.FLAG_SESAME_JOIN_LIMIT_REACHED) ->
+                inactive("今日芝麻信用任务领取已达上限")
+
+            else -> ModelFieldTodayState()
         }
     }
 
@@ -335,6 +373,14 @@ object ModelFieldTodayStateResolver {
             current = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_DAILY_COUNT),
             limit = intValue(modelFields["donationCompetitionSpecialFoodCount"]),
             reason = "今日排位赛特殊食品使用已达上限"
+        )
+    }
+
+    private fun farmDonationState(): ModelFieldTodayState {
+        val currentUid = UserMap.currentUid?.takeIf { it.isNotBlank() } ?: return ModelFieldTodayState()
+        return flag(
+            StatusFlags.FLAG_FARM_DAILY_DONATION_DONE_PREFIX + currentUid,
+            "今日公益捐蛋已处理"
         )
     }
 

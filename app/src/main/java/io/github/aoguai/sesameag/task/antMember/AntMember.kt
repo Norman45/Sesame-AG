@@ -382,7 +382,8 @@ class AntMember : ModelTask() {
             merchantSign?.value == true &&
                 !hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MERCHANT_SIGN_DONE)
         val needMerchantMoreTask =
-            merchantMoreTask?.value == true
+            merchantMoreTask?.value == true &&
+                !hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MERCHANT_MORE_TASK_DONE)
 
         if (!(needKmdkSignIn || needKmdkSignUp || needMerchantSign || needMerchantMoreTask)) {
             Log.member("⏭️ 今天已处理过商家服务相关任务，跳过执行")
@@ -5907,6 +5908,9 @@ class AntMember : ModelTask() {
         private const val memberTaskBlacklistModule = "支付宝会员"
         private const val insuredTaskBlacklistModule = "蚂蚁保"
         private const val memberFloatingBallAdTaskTitle = "会员浮球广告浏览任务"
+        private const val MERCHANT_EXAM_TASK_CODE = "JYMWDDJF_TASK"
+        private const val MERCHANT_EXAM_PRODUCE_CHANNEL = "GW_MRCHSERVEBASE_DEFAULT"
+        private const val MERCHANT_UNCLOSED_AD_TASK_CODE = "SYH_RTB_SHOW_TASK_INDEX_1"
         private const val INSURED_GOLD_WAIT_LIST_QUERY_LIMIT = 3
         private val memberTaskClosedLoopConfigIds = setOf(
             "600202500151482",
@@ -6125,9 +6129,12 @@ class AntMember : ModelTask() {
         private suspend fun doMerchantMoreTask(): Unit = CoroutineUtils.run {
             try {
                 val adapter = MerchantMoreTaskFlowAdapter()
-                TaskFlowEngine(adapter, roundSleepMs = 500L).run()
-                if (adapter.taskCount == 0) {
+                val runResult = TaskFlowEngine(adapter, roundSleepMs = 500L).run()
+                if (adapter.taskListObserved && adapter.taskCount == 0) {
                     Log.member("商家服务🏬[积分任务]#未查询到任务列表")
+                }
+                if (runResult.completed || (adapter.querySucceeded && adapter.taskListObserved && adapter.taskCount == 0)) {
+                    setFlagToday(StatusFlags.FLAG_ANTMEMBER_MERCHANT_MORE_TASK_DONE)
                 }
                 collectMerchantPointBalls()
             } catch (t: Throwable) {
@@ -6140,6 +6147,10 @@ class AntMember : ModelTask() {
             override val flowName: String = "商家服务🏬积分任务"
 
             var taskCount: Int = 0
+                private set
+            var querySucceeded: Boolean = false
+                private set
+            var taskListObserved: Boolean = false
                 private set
 
             private val handledTaskKeys = LinkedHashSet<String>()
@@ -6163,7 +6174,8 @@ class AntMember : ModelTask() {
             }
 
             override fun isQuerySuccess(response: JSONObject): Boolean {
-                return response.optBoolean("_taskFlowQuerySuccess", false)
+                querySucceeded = response.optBoolean("_taskFlowQuerySuccess", false)
+                return querySucceeded
             }
 
             override fun extractItems(response: JSONObject): List<TaskFlowItem> {
@@ -6174,6 +6186,7 @@ class AntMember : ModelTask() {
                     return emptyList()
                 }
                 val taskList = data.optJSONArray("taskList") ?: return emptyList()
+                taskListObserved = true
                 taskCount = max(taskCount, taskList.length())
                 val items = mutableListOf<TaskFlowItem>()
                 for (i in 0 until taskList.length()) {
@@ -6238,6 +6251,9 @@ class AntMember : ModelTask() {
                 ) {
                     return true
                 }
+                if (item.type == MERCHANT_UNCLOSED_AD_TASK_CODE && isBlacklisted(item)) {
+                    return true
+                }
                 if (phase == TaskFlowPhase.REWARD_READY &&
                     raw.optString("pointBallId").isBlank() &&
                     resolveMerchantBizId(raw).isBlank()
@@ -6251,7 +6267,10 @@ class AntMember : ModelTask() {
                     logSkipOnce(item, "缺少taskCode，跳过")
                     return true
                 }
-                if (phase == TaskFlowPhase.READY_TO_COMPLETE && item.actionType.isBlank()) {
+                if (phase == TaskFlowPhase.READY_TO_COMPLETE &&
+                    item.actionType.isBlank() &&
+                    item.type != MERCHANT_EXAM_TASK_CODE
+                ) {
                     logSkipOnce(item, "缺少actionCode，跳过")
                     return true
                 }
@@ -6302,12 +6321,15 @@ class AntMember : ModelTask() {
             }
 
             override fun complete(item: TaskFlowItem): TaskFlowActionResult {
+                if (item.type == MERCHANT_EXAM_TASK_CODE) {
+                    return completeMerchantExamTask(item)
+                }
                 val actionCodes = item.actionType.split("|")
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
                 var lastFailure: TaskFlowActionResult? = null
                 val targetCount = resolveMerchantTaskTargetCount(item.raw ?: JSONObject())
-                for (actionCode in actionCodes) {
+                actionLoop@ for (actionCode in actionCodes) {
                     val queryActivity = JSONObject(AntMemberRpcCall.actioncode(actionCode))
                     val queryEvaluation = evaluateMerchantRpc(queryActivity)
                     if (!queryEvaluation.success) {
@@ -6319,6 +6341,10 @@ class AntMember : ModelTask() {
                             actionCode
                         )
                         lastFailure = failure
+                        if (queryEvaluation.failureType == MerchantRpcFailureType.NO_ACTIVITY) {
+                            logMerchantRpcFailure("查询任务活动[${item.title}/$actionCode]", queryActivity, queryEvaluation)
+                            continue
+                        }
                         if (failure.failureType == TaskRpcFailureType.RETRYABLE_RPC ||
                             failure.failureType == TaskRpcFailureType.BUSINESS_LIMIT
                         ) {
@@ -6341,6 +6367,10 @@ class AntMember : ModelTask() {
                                 actionCode
                             )
                             lastFailure = failure
+                            if (produceEvaluation.failureType == MerchantRpcFailureType.NO_ACTIVITY) {
+                                logMerchantRpcFailure("完成任务[${item.title}/$actionCode]", produce, produceEvaluation)
+                                continue@actionLoop
+                            }
                             if (failure.failureType == TaskRpcFailureType.RETRYABLE_RPC ||
                                 failure.failureType == TaskRpcFailureType.BUSINESS_LIMIT
                             ) {
@@ -6376,6 +6406,59 @@ class AntMember : ModelTask() {
                     rpc = "AntMemberRpcCall.actioncode",
                     detail = merchantTaskActionDetail(item, "complete")
                 )
+            }
+
+            private fun completeMerchantExamTask(item: TaskFlowItem): TaskFlowActionResult {
+                val examPage = JSONObject(AntMemberRpcCall.merchantExamPage(item.type))
+                val examEvaluation = evaluateMerchantRpc(examPage)
+                if (!examEvaluation.success) {
+                    return merchantTaskFailureResult(
+                        item,
+                        "AntMemberRpcCall.merchantExamPage",
+                        examPage,
+                        examEvaluation,
+                        item.type
+                    )
+                }
+
+                val data = examPage.optJSONObject("data")
+                if (data == null || !data.optBoolean("available", false)) {
+                    return TaskFlowActionResult.failure(
+                        failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+                        code = "MERCHANT_EXAM_UNAVAILABLE",
+                        message = "答题任务当前不可用",
+                        rpc = "AntMemberRpcCall.merchantExamPage",
+                        raw = examPage.toString(),
+                        detail = merchantTaskActionDetail(item, "examPage")
+                    )
+                }
+
+                val actionCode = data.optString("actionCode").trim()
+                if (actionCode.isEmpty()) {
+                    return TaskFlowActionResult.failure(
+                        failureType = TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW,
+                        code = "MERCHANT_EXAM_ACTION_MISSING",
+                        message = "答题任务缺少actionCode",
+                        rpc = "AntMemberRpcCall.merchantExamPage",
+                        raw = examPage.toString(),
+                        detail = merchantTaskActionDetail(item, "examPage")
+                    )
+                }
+
+                val produce = JSONObject(AntMemberRpcCall.produce(actionCode, MERCHANT_EXAM_PRODUCE_CHANNEL))
+                val produceEvaluation = evaluateMerchantRpc(produce)
+                if (!produceEvaluation.success) {
+                    return merchantTaskFailureResult(
+                        item,
+                        "AntMemberRpcCall.produce",
+                        produce,
+                        produceEvaluation,
+                        actionCode
+                    )
+                }
+
+                Log.member("商家服务🏬[${item.title}]#完成答题任务")
+                return TaskFlowActionResult.success()
             }
 
             override fun actionKey(item: TaskFlowItem, action: TaskFlowAction): String {

@@ -170,6 +170,9 @@ object StatusFlags {
     /** 商家服务：每日签到 */
     const val FLAG_ANTMEMBER_MERCHANT_SIGN_DONE: String = "AntMember::merchantSignDone"
 
+    /** 商家服务：今日积分任务是否已处理 */
+    const val FLAG_ANTMEMBER_MERCHANT_MORE_TASK_DONE: String = "AntMember::merchantMoreTaskDone"
+
     /** 商家服务：开门打卡签到（06:00-12:00） */
     const val FLAG_ANTMEMBER_MERCHANT_KMDK_SIGNIN_DONE: String = "AntMember::merchantKmdkSignInDone"
 
@@ -200,6 +203,9 @@ object StatusFlags {
 
     /** 今日运动日常任务是否已完成 */
     const val FLAG_ANTSPORTS_DAILY_TASKS_DONE: String = "FLAG_ANTSPORTS_dailyTasks_Done"
+
+    /** 今日运动问答是否已处理 */
+    const val FLAG_ANTSPORTS_MOTION_DAILY_QUIZ_DONE: String = "AntSports::motionDailyQuizDone"
 
     /** 运动签到：今日已处理或已进入业务止损 */
     const val FLAG_ANTSPORTS_CHECK_IN_HANDLED_TODAY: String = "AntSports::checkInHandledToday"
