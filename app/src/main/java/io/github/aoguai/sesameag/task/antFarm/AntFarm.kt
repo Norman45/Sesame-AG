@@ -303,7 +303,6 @@ class AntFarm : ModelTask() {
     internal var onlyQueryNewOrnaments: BooleanModelField? = null // 仅查询未兑换装扮
 
     internal var visitAnimal: BooleanModelField? = null
-    internal var useSmartSchedulerManager: BooleanModelField? = null
     private var hasFence: Boolean = false       // 是否正在使用篱笆
     private var fenceCountDown: Int = 0
     // 雇佣NPC
@@ -894,14 +893,6 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("开启后不执行兑换，仅查询并提示商城中未拥有的装扮。需开启“装扮商城 | 开启”。").also {
                 onlyQueryNewOrnaments = it
-            })
-        modelFields.addField(
-            BooleanModelField(
-                "useSmartSchedulerManager",
-                "蹲点任务 | 使用精细定时",
-                false
-            ).withDesc("蹲点投喂、定时赶鸡等子任务优先使用精细定时调度。").also {
-                useSmartSchedulerManager = it
             })
         modelFields.addField(
             BooleanModelField(
@@ -1716,8 +1707,7 @@ class AntFarm : ModelTask() {
                                         Log.printStackTrace(TAG,"蹲点投喂任务执行失败", e)
                                     }
                                 },
-                                execTime = nextFeedTime,
-                                useSmartScheduler = useSmartSchedulerManager?.value == true
+                                execTime = nextFeedTime
                             )
                         )
                         Log.farm(UserMap.getCurrentMaskName() + "小鸡的蹲点投喂时间[" + TimeUtil.getCommonDate(nextFeedTime)+"]")
@@ -3564,8 +3554,7 @@ class AntFarm : ModelTask() {
                                         Log.printStackTrace(TAG, e)
                                     }
                                 },
-                                execTime = System.currentTimeMillis() + timeSendBackAnimal * 60 * 1000L,
-                                useSmartScheduler = useSmartSchedulerManager?.value == true
+                                execTime = System.currentTimeMillis() + timeSendBackAnimal * 60 * 1000L
                             )
                             addChildTask(task)
                             Log.farm(UserMap.getCurrentMaskName() + "${timeSendBackAnimal}分钟后${kcTime}蹲点赶小鸡")
