@@ -2873,15 +2873,17 @@ class AntFarm : ModelTask() {
         val consumedIndex = getFarmTaskTriggerIndex()
         val decision = TimeTriggerEvaluator.evaluateNow(spec, consumedIndex = consumedIndex)
         if (!decision.allowNow) {
+            val triggerContext = "配置=${spec.raw}，当前=${TimeUtil.getCommonDate(System.currentTimeMillis())}；" +
+                "答题/视频/杂货铺/排位赛/家庭等做任务遵守该槽位，已完成任务领奖和雇佣小鸡仍由各自开关流程处理"
             when {
                 decision.blockedNow && decision.nextTriggerAt != null -> {
-                    Log.farm("饲料任务当前槽位命中禁止窗口，等待${TimeUtil.getCommonDate(decision.nextTriggerAt)}后再尝试")
+                    Log.farm("饲料任务当前槽位命中禁止窗口，等待${TimeUtil.getCommonDate(decision.nextTriggerAt)}后再尝试；$triggerContext")
                 }
                 decision.nextTriggerAt != null -> {
-                    Log.farm("饲料任务未到触发时机，下一次可尝试时间=${TimeUtil.getCommonDate(decision.nextTriggerAt)}")
+                    Log.farm("饲料任务未到触发时机，下一次可尝试时间=${TimeUtil.getCommonDate(decision.nextTriggerAt)}；$triggerContext")
                 }
                 else -> {
-                    Log.farm("饲料任务今日已无可用触发槽位，跳过")
+                    Log.farm("饲料任务今日已无可用触发槽位，跳过；$triggerContext")
                 }
             }
             return false
