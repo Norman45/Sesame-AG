@@ -5295,32 +5295,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     /**
      * 保护罩剩余时间判断
-     * 以整数 HHmm 指定保护罩续写阈值。
-     * 例如：2355 表示 23 小时 55 分钟，0955 可直接写为 955。
-     * 校验规则：0 ≤ HH ≤ 99，0 ≤ mm ≤ 59；非法值将回退为默认值。
+     * 新规则允许保护罩剩余有效期低于7天时延长使用。
      */
     @SuppressLint("DefaultLocale")
     private fun shouldRenewShield(shieldEnd: Long, nowMillis: Long): Boolean {
-        // 解析阈值配置
-        var hours: Int
-        var minutes: Int
-        try {
-            val abs = abs(SHIELD_RENEW_THRESHOLD_HHMM)
-            hours = abs / 100 // 提取小时部分
-            minutes = abs % 100 // 提取分钟部分
-            // 可以添加分钟有效性检查
-            if (minutes > 59) {
-                Log.forest("[保护罩] 分钟数无效: $minutes, 使用默认值")
-                hours = 23
-                minutes = 59
-            }
-        } catch (e: Exception) {
-            Log.forest("[保护罩] 解析阈值配置异常: " + e.message + ", 使用默认值")
-            hours = 23
-            minutes = 59
-        }
-        val thresholdMs = hours * TimeFormatter.ONE_HOUR_MS + minutes * TimeFormatter.ONE_MINUTE_MS
-
         // 检测异常数据
         if (shieldEnd > 0 && shieldEnd < nowMillis - 365 * TimeFormatter.ONE_DAY_MS) {
             Log.forest("[保护罩] ⚠️ 检测到异常时间数据(${TimeUtil.getCommonDate(shieldEnd)})，跳过检查")
@@ -5340,19 +5318,19 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             return true
         }
         val remain = shieldEnd - nowMillis
-        val needRenew = remain <= thresholdMs
+        val needRenew = remain < SHIELD_RENEW_THRESHOLD_MS
         // 格式化剩余时间和阈值时间为更直观的显示
         val remainTimeStr = TimeFormatter.formatRemainingTime(remain)
-        val thresholdTimeStr = String.format("%02d小时%02d分", hours, minutes)
+        val thresholdTimeStr = TimeFormatter.formatRemainingTime(SHIELD_RENEW_THRESHOLD_MS)
         if (needRenew) {
             Log.forest(String.format(
-                    "[保护罩] 🔄 需要续写 - 剩余时间[%s] ≤ 续写阈值[%s]",
+                    "[保护罩] 🔄 需要续写 - 剩余时间[%s] < 续写阈值[%s]",
                     remainTimeStr, thresholdTimeStr
                 )
             )
         } else {
             Log.forest(String.format(
-                    "[保护罩] ✅ 无需续写 - 剩余时间[%s] > 续写阈值[%s]",
+                    "[保护罩] ✅ 无需续写 - 剩余时间[%s] ≥ 续写阈值[%s]",
                     remainTimeStr, thresholdTimeStr
                 )
             )
@@ -6419,13 +6397,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 val selected = sameFactorCandidates.first()
                 Log.forest(
                     "当前${formatRobMultiplierFactor(active.factor)}倍卡剩余${formatTimeDifference(activeRemainingMs)}，" +
-                            "满足少于14天延期条件，选择[${selected.propName}]"
+                            "满足少于30天延期条件，选择[${selected.propName}]"
                 )
                 return selected
             }
             Log.forest(
                 "当前${formatRobMultiplierFactor(active.factor)}倍卡剩余${formatTimeDifference(activeRemainingMs)}，" +
-                        "不少于14天，跳过同倍率延期"
+                        "不少于30天，跳过同倍率延期"
             )
         }
 
@@ -7621,7 +7599,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         private const val GIFT7TH_SIGN_SOURCE = "chInfo_ch_appcenter__chsub_9patch"
         private const val FOREST_SIGN_TASK_TYPE = "__FOREST_SIGN__"
         private const val LEGACY_FOREST_GAME_TASK_TYPE = "mokuai_senlin_hlz"
-        private const val ROB_MULTIPLIER_PROLONG_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000L
+        private const val ROB_MULTIPLIER_PROLONG_THRESHOLD_MS = 30 * TimeFormatter.ONE_DAY_MS
         private const val ROB_MULTIPLIER_FACTOR_EPS = 0.0001
 
         @JvmField
@@ -7630,10 +7608,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
         private val offsetTimeMath = Average(5)
 
-
-        // 保持向后兼容
-        /** 保护罩续写阈值（HHmm），例如 2359 表示 23小时59分  */
-        private const val SHIELD_RENEW_THRESHOLD_HHMM = 2359
+        /** 保护罩剩余有效期低于7天时可延长使用。 */
+        private const val SHIELD_RENEW_THRESHOLD_MS = 7 * TimeFormatter.ONE_DAY_MS
         var giveEnergyRainList: FriendSelectionModelField? = null //能量雨赠送列表
         var medicalHealthOption: SelectModelField? = null //医疗健康选项
         var ecoLifeOption: SelectModelField? = null
