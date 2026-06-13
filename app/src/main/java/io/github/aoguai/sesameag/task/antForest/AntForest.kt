@@ -3753,9 +3753,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                             }
                         }
                     }
-                    else -> {
-                        if (!silent) Log.forest("跳过非目标道具:$userUsingProp")
-                    }
                 }
             }
         } catch (th: Throwable) {
