@@ -66,7 +66,7 @@ import kotlin.math.min
 
 /**
  * @file AntSports.kt
- * @brief 支付宝蚂蚁运动主任务逻辑（Kotlin 重构版）。
+ * @brief 目标应用蚂蚁运动主任务逻辑（Kotlin 重构版）。
  *
  * @details
  * 负责统一调度蚂蚁运动相关的所有自动化逻辑，包括：
@@ -779,7 +779,7 @@ class AntSports : ModelTask() {
                     UserMap.currentUid,
                     ExchangeOptionsRefreshBridge.TARGET_SPORTS_ENERGY
                 )
-                Log.sports("运动能量兑换🎁目标应用未就绪，设置页使用结构化缓存列表#${cachedRows.size}")
+                Log.sports("运动能量兑换🎁目标应用未就绪，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
             val refreshResult = ExchangeOptionsRefreshBridge.requestRefreshOptions(
@@ -1659,7 +1659,7 @@ class AntSports : ModelTask() {
             if (unsupportedLoggedKeys.add("${item.status}:$key:$unsupportedReason")) {
                 blacklistClassifiedSportsTask(key, item.title, "UNSUPPORTED_NO_CLOSURE")
                 Log.sports(
-                    "运动任务面板[无稳定闭环，已加入黑名单] ${item.title}" +
+                    "运动任务面板[当前暂无稳定自动完成闭环，已加入自动跳过列表(黑名单)] ${item.title}" +
                         "(taskId=$key, status=${item.status}, reason=$unsupportedReason)"
                 )
             }
@@ -3095,7 +3095,7 @@ class AntSports : ModelTask() {
                         TaskBlacklist.isTaskInBlacklist(SPORTS_TASK_BLACKLIST_MODULE, taskId) ||
                             TaskBlacklist.isTaskInBlacklist(SPORTS_TASK_BLACKLIST_MODULE, taskName)
                     if (isBlacklisted && taskStatus != "WAIT_RECEIVE") {
-                        Log.sports("运动首页任务[黑名单跳过：$taskName，taskId=$taskId]")
+                        Log.sports("运动首页任务[自动跳过列表(黑名单)：$taskName，taskId=$taskId]")
                         continue
                     }
 
@@ -3233,7 +3233,7 @@ class AntSports : ModelTask() {
             TaskBlacklist.isTaskInBlacklist(SPORTS_TASK_BLACKLIST_MODULE, SPORTS_CHECK_IN_TITLE) ||
             TaskBlacklist.isTaskInBlacklist(SPORTS_TASK_BLACKLIST_MODULE, SPORTS_DOLPHIN_ACTIVITY_TITLE)
         ) {
-            Log.sports("运动签到[黑名单跳过]")
+            Log.sports("运动签到[自动跳过列表(黑名单)]")
             return
         }
         if (Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_CHECK_IN_HANDLED_TODAY)) {
@@ -4832,7 +4832,7 @@ class AntSports : ModelTask() {
     internal fun participate() {
         try {
             if (TaskBlacklist.isTaskInBlacklist(SPORTS_TASK_BLACKLIST_MODULE, SPORTS_WALK_CHALLENGE_TITLE)) {
-                Log.sports("走路挑战赛线上赛[黑名单跳过]")
+                Log.sports("走路挑战赛线上赛[自动跳过列表(黑名单)]")
                 return
             }
             val joinedQuery = queryJoinedWalkChallenge()

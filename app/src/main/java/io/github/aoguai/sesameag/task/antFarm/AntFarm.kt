@@ -1577,7 +1577,7 @@ class AntFarm : ModelTask() {
                     ExchangeOptionsRefreshBridge.TARGET_FARM_IP_CHOUCHOULE
                 )
                 if (cachedRows.isNotEmpty()) {
-                    Log.farm("IP抽抽乐商店💸目标应用未就绪，设置页使用结构化缓存列表#${cachedRows.size}")
+                    Log.farm("IP抽抽乐商店💸目标应用未就绪，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                     return cachedRows
                 }
                 val legacyRows = AntFarmIPChouChouLeBenefit.getList()
@@ -1647,7 +1647,7 @@ class AntFarm : ModelTask() {
                     UserMap.currentUid,
                     ExchangeOptionsRefreshBridge.TARGET_FARM_PARADISE
                 )
-                Log.farm("小鸡乐园币💸目标应用未就绪，设置页使用结构化缓存列表#${cachedRows.size}")
+                Log.farm("小鸡乐园币💸目标应用未就绪，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
             val refreshResult = ExchangeOptionsRefreshBridge.requestRefreshOptions(

@@ -774,7 +774,7 @@ class AntMember : ModelTask() {
                     UserMap.currentUid,
                     ExchangeOptionsRefreshBridge.TARGET_MEMBER_POINT
                 )
-                Log.member("会员积分🎐目标应用未就绪，设置页使用结构化缓存列表#${cachedRows.size}")
+                Log.member("会员积分🎐目标应用未就绪，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
             val refreshResult = ExchangeOptionsRefreshBridge.requestRefreshOptions(
@@ -946,7 +946,7 @@ class AntMember : ModelTask() {
                     UserMap.currentUid,
                     ExchangeOptionsRefreshBridge.TARGET_BEAN_RIGHT
                 )
-                Log.member("安心豆🫘目标应用未就绪，设置页使用结构化缓存列表#${cachedRows.size}")
+                Log.member("安心豆🫘目标应用未就绪，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
             val refreshResult = ExchangeOptionsRefreshBridge.requestRefreshOptions(
@@ -1600,7 +1600,7 @@ class AntMember : ModelTask() {
         override fun isBlacklisted(item: TaskFlowItem): Boolean {
             val blacklisted = super<TaskFlowAdapter>.isBlacklisted(item)
             if (blacklisted) {
-                logMemberTaskSkipOnce(item, "黑名单任务，跳过")
+                logMemberTaskSkipOnce(item, "任务在自动跳过列表(黑名单)中，跳过")
             }
             return blacklisted
         }
@@ -1922,7 +1922,7 @@ class AntMember : ModelTask() {
             val adBizId = resolveMemberAdTaskBizId(taskProcessObject, simpleTaskConfig)
             val taskConfigId = resolveCurrentMemberTaskConfigId(taskProcessObject) ?: continue
             if (skipBlacklisted && isMemberTaskInBlacklist(taskConfigId, title)) {
-                Log.member("会员任务[$title]#黑名单任务，跳过")
+                Log.member("会员任务[$title]#任务在自动跳过列表(黑名单)中，跳过")
                 continue
             }
             if (!isWhitelistedMemberTaskConfigId(taskConfigId, adBizId.isNotEmpty())) {
@@ -3070,7 +3070,7 @@ class AntMember : ModelTask() {
             }
 
             if (isBlacklisted(item)) {
-                logInsuredTaskSkipOnce(item, "黑名单任务，跳过")
+                logInsuredTaskSkipOnce(item, "任务在自动跳过列表(黑名单)中，跳过")
                 return true
             }
 
@@ -3784,11 +3784,11 @@ class AntMember : ModelTask() {
         if (loggedUnsupportedMemberTaskIds.size > MEMBER_TASK_UNSUPPORTED_LOG_LIMIT) {
             if (!unsupportedMemberTaskOverflowLogged) {
                 unsupportedMemberTaskOverflowLogged = true
-                Log.member("会员任务#更多未纳入白名单闭环任务已加入黑名单并省略日志")
+                Log.member("会员任务#更多未纳入自动闭环白名单的任务已加入自动跳过列表(黑名单)，并省略后续重复日志")
             }
             return
         }
-        Log.member("会员任务[$taskTitle]#未纳入白名单闭环，已加入黑名单($detail)")
+        Log.member("会员任务[$taskTitle]#未纳入自动闭环白名单，已加入自动跳过列表(黑名单)($detail)")
     }
 
     private fun isMemberTaskInBlacklist(taskConfigId: String, taskTitle: String): Boolean {
@@ -5259,7 +5259,7 @@ class AntMember : ModelTask() {
         override fun isBlacklisted(item: TaskFlowItem): Boolean {
             val blacklisted = super<TaskFlowAdapter>.isBlacklisted(item)
             if (blacklisted) {
-                logSkipOnce(item, "黑名单任务，跳过")
+                logSkipOnce(item, "任务在自动跳过列表(黑名单)中，跳过")
             }
             return blacklisted
         }
@@ -5667,7 +5667,7 @@ class AntMember : ModelTask() {
         override fun isBlacklisted(item: TaskFlowItem): Boolean {
             val blacklisted = super<TaskFlowAdapter>.isBlacklisted(item)
             if (blacklisted) {
-                logSkipOnce(item, "黑名单任务，跳过")
+                logSkipOnce(item, "任务在自动跳过列表(黑名单)中，跳过")
             }
             return blacklisted
         }
@@ -5843,7 +5843,7 @@ class AntMember : ModelTask() {
                 else -> "未验证的P2E任务类型"
             }
             TaskBlacklist.addToBlacklist(moduleName, item.id, item.title)
-            logSkipOnce(item, "无稳定闭环，已加入黑名单:$reason")
+            logSkipOnce(item, "当前暂无稳定自动完成闭环，已加入自动跳过列表(黑名单):$reason")
         }
 
         private fun logSkipOnce(item: TaskFlowItem, reason: String) {
@@ -7145,7 +7145,7 @@ class AntMember : ModelTask() {
 
     companion object {
         private val TAG: String = AntMember::class.java.getSimpleName()
-        private const val memberTaskBlacklistModule = "支付宝会员"
+        private const val memberTaskBlacklistModule = "目标应用会员"
         private const val insuredTaskBlacklistModule = "蚂蚁保"
         private const val memberFloatingBallAdTaskTitle = "会员浮球广告浏览任务"
         private const val MERCHANT_EXAM_TASK_CODE = "JYMWDDJF_TASK"
@@ -7581,7 +7581,7 @@ class AntMember : ModelTask() {
             override fun isBlacklisted(item: TaskFlowItem): Boolean {
                 val blacklisted = super<TaskFlowAdapter>.isBlacklisted(item)
                 if (blacklisted) {
-                    logSkipOnce(item, "黑名单任务，跳过")
+                    logSkipOnce(item, "任务在自动跳过列表(黑名单)中，跳过")
                 }
                 return blacklisted
             }
@@ -8272,7 +8272,7 @@ class AntMember : ModelTask() {
             if (TaskBlacklist.isTaskInBlacklist(memberTaskBlacklistModule, title) ||
                 TaskBlacklist.isTaskInBlacklist(memberTaskBlacklistModule, taskCode)
             ) {
-                Log.member("商家服务🏬[$title]#黑名单任务，停止执行")
+                Log.member("商家服务🏬[$title]#任务在自动跳过列表(黑名单)中，停止执行")
                 return@run false
             }
 

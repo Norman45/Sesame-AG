@@ -1775,7 +1775,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     UserMap.currentUid,
                     ExchangeOptionsRefreshBridge.TARGET_FOREST_VITALITY
                 )
-                Log.forest("活力值兑换🎁目标应用未启动，设置页使用结构化缓存列表#${cachedRows.size}")
+                Log.forest("活力值兑换🎁目标应用未启动，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
             val refreshResult = ExchangeOptionsRefreshBridge.requestRefreshOptions(
