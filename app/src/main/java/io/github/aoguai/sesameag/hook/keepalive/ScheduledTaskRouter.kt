@@ -461,6 +461,11 @@ object ScheduledTaskRouter {
         return context.packageName == General.PACKAGE_NAME
     }
 
+    private fun payloadOf(schedule: PersistentSchedule): JSONObject {
+        return runCatching { JSONObject(schedule.payloadJson.ifBlank { "{}" }) }
+            .getOrDefault(JSONObject())
+    }
+
     private fun shouldLaunchTarget(schedule: PersistentSchedule): Boolean {
         return PersistentLaunchPolicy.shouldLaunchTarget(schedule)
     }
