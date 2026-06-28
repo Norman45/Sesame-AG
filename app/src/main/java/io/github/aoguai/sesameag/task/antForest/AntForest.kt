@@ -5692,19 +5692,20 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     internal fun closeEnergyRainGameDriveTask(
         request: EnergyRainCoroutine.EnergyRainGameDriveRequest
     ): EnergyRainCoroutine.EnergyRainGameDriveResult {
-        val driveTaskType = request.driveTaskType.takeIf { it.isNotBlank() }
-            ?: return EnergyRainCoroutine.EnergyRainGameDriveResult(
-                EnergyRainCoroutine.EnergyRainGameDriveStatus.NOT_FOUND,
-                "缺少普通森林驱动任务类型"
-            )
-        if (TaskBlacklist.isTaskInBlacklist(forestTaskBlacklistModule, driveTaskType)) {
-            return EnergyRainCoroutine.EnergyRainGameDriveResult(
-                EnergyRainCoroutine.EnergyRainGameDriveStatus.SKIPPED_BLACKLISTED,
-                "普通森林驱动任务已在黑名单: $driveTaskType"
-            )
-        }
-
         return try {
+            val gameCenterContext = syncEnergyRainGameCenterContext(request)
+            val gameCenterDriveResult = closeEnergyRainGameCenterDeliveryTasks(request, gameCenterContext.deliveryTasks)
+            val driveTaskType = request.driveTaskType.takeIf { it.isNotBlank() }
+                ?: return gameCenterDriveResult ?: EnergyRainCoroutine.EnergyRainGameDriveResult(
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.NOT_FOUND,
+                    "缺少普通森林驱动任务类型"
+                )
+            if (TaskBlacklist.isTaskInBlacklist(forestTaskBlacklistModule, driveTaskType)) {
+                return gameCenterDriveResult ?: EnergyRainCoroutine.EnergyRainGameDriveResult(
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.SKIPPED_BLACKLISTED,
+                    "普通森林驱动任务已在黑名单: $driveTaskType"
+                )
+            }
             val taskSources = listOf(
                 "energy_rain_drive_listTaskByIds" to {
                     AntForestRpcCall.listTaskByIdsopengreen(
@@ -5732,15 +5733,35 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 AntForestRpcCall.BACK_FROM_ENERGY_RAIN_SOURCE
             )
 
-            val message = "gameTask=${request.gameTaskType}(${request.gameTaskStatus}) driveTask=$driveTaskType"
+            val gameCenterMessage = gameCenterDriveResult?.message
+                ?.takeIf { it.isNotBlank() }
+                ?.let { " gameCenter=[$it]" }
+                .orEmpty()
+            val message = "gameTask=${request.gameTaskType}(${request.gameTaskStatus}) " +
+                "driveTask=$driveTaskType$gameCenterMessage"
             val status = when {
                 TaskBlacklist.isTaskInBlacklist(forestTaskBlacklistModule, driveTaskType) ->
                     EnergyRainCoroutine.EnergyRainGameDriveStatus.SKIPPED_BLACKLISTED
 
                 runResult.completed -> EnergyRainCoroutine.EnergyRainGameDriveStatus.CONFIRMED_DONE
                 runResult.progressed -> EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED
+                gameCenterDriveResult?.status == EnergyRainCoroutine.EnergyRainGameDriveStatus.CONFIRMED_DONE ->
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.CONFIRMED_DONE
+
+                gameCenterDriveResult?.status == EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED ->
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED
+
                 runResult.stopped || runResult.interrupted -> EnergyRainCoroutine.EnergyRainGameDriveStatus.RETRYABLE_FAILED
                 runResult.actionAttempted -> EnergyRainCoroutine.EnergyRainGameDriveStatus.NO_PROGRESS
+                gameCenterDriveResult?.status == EnergyRainCoroutine.EnergyRainGameDriveStatus.RETRYABLE_FAILED ->
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.RETRYABLE_FAILED
+
+                gameCenterDriveResult?.status == EnergyRainCoroutine.EnergyRainGameDriveStatus.NON_RETRYABLE_FAILED ->
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.NON_RETRYABLE_FAILED
+
+                gameCenterDriveResult?.status == EnergyRainCoroutine.EnergyRainGameDriveStatus.NO_PROGRESS ->
+                    EnergyRainCoroutine.EnergyRainGameDriveStatus.NO_PROGRESS
+
                 else -> EnergyRainCoroutine.EnergyRainGameDriveStatus.NOT_FOUND
             }
             EnergyRainCoroutine.EnergyRainGameDriveResult(status, message)
@@ -5750,6 +5771,270 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 EnergyRainCoroutine.EnergyRainGameDriveStatus.RETRYABLE_FAILED,
                 "普通森林驱动任务闭环异常: ${t.message.orEmpty()}"
             )
+        }
+    }
+
+    private data class EnergyRainGameCenterContext(
+        val deliveryTasks: List<EnergyRainGameCenterDeliveryTask> = emptyList()
+    )
+
+    private data class EnergyRainGameCenterDeliveryTask(
+        val sourceName: String,
+        val sceneCode: String,
+        val taskType: String,
+        val status: String,
+        val title: String,
+        val appId: String,
+        val awardCount: Int,
+        val rightTimes: Int,
+        val rightTimesLimit: Int
+    )
+
+    private fun syncEnergyRainGameCenterContext(
+        request: EnergyRainCoroutine.EnergyRainGameDriveRequest
+    ): EnergyRainGameCenterContext {
+        rememberForestGameCenterApp(request.appId)
+        val deliveryTasks = linkedMapOf<String, EnergyRainGameCenterDeliveryTask>()
+        val appSuffix = request.appId?.takeIf { it.isNotBlank() }?.let { " appId=$it" }.orEmpty()
+        val progressSuffix = " progress=${request.taskProgress}/${request.taskRequire}"
+        Log.forest(
+            "能量雨游戏任务[${request.gameTaskTitle}]同步森林游戏中心上下文" +
+                "$appSuffix scene=${request.sceneCode}$progressSuffix"
+        )
+        syncEnergyRainGameCenterResponse("queryGameList") {
+            AntForestRpcCall.queryGameList(currentForestGameCenterRecentAppRecords())
+        }?.let { payload ->
+            appendEnergyRainGameCenterDeliveryTasks("queryGameList", payload, request.appId, deliveryTasks)
+        }
+        syncEnergyRainGameCenterResponse("queryOptionalPlay") {
+            AntForestRpcCall.queryOptionalPlay(currentForestGameCenterRecentAppRecords())
+        }?.let { payload ->
+            appendEnergyRainGameCenterDeliveryTasks("queryOptionalPlay", payload, request.appId, deliveryTasks)
+        }
+        return EnergyRainGameCenterContext(deliveryTasks.values.toList())
+    }
+
+    private fun syncEnergyRainGameCenterResponse(
+        sourceName: String,
+        request: () -> String
+    ): JSONObject? {
+        try {
+            val response = request()
+            if (response.isBlank()) {
+                Log.forest("能量雨游戏中心上下文[$sourceName]返回空，本轮继续后续驱动")
+                return null
+            }
+            val payload = JSONObject(response)
+            rememberForestGameCenterAppIds(payload)
+            if (!ResChecker.checkRes(TAG, payload)) {
+                val msg = payload.optString("desc").ifBlank {
+                    payload.optString("resultDesc").ifBlank { payload.optString("memo") }
+                }
+                Log.forest("能量雨游戏中心上下文[$sourceName]未确认成功: $msg")
+            }
+            return payload
+        } catch (t: Throwable) {
+            Log.forest("能量雨游戏中心上下文[$sourceName]同步异常: ${t.message.orEmpty()}")
+            return null
+        }
+    }
+
+    private fun appendEnergyRainGameCenterDeliveryTasks(
+        sourceName: String,
+        source: Any?,
+        requestAppId: String?,
+        deliveryTasks: MutableMap<String, EnergyRainGameCenterDeliveryTask>
+    ) {
+        when (source) {
+            is JSONObject -> {
+                val appId = source.optString("appId")
+                    .ifBlank { extractForestTaskAppId(source.optString("gameUrl")).orEmpty() }
+                    .ifBlank { extractForestTaskAppId(source.optString("targetUrl")).orEmpty() }
+                val deliveryBenefitList = source.optJSONArray("deliveryBenefitList")
+                if (!requestAppId.isNullOrBlank() &&
+                    appId == requestAppId &&
+                    deliveryBenefitList != null
+                ) {
+                    val title = source.optString("title")
+                        .ifBlank { source.optString("desc") }
+                        .ifBlank { requestAppId }
+                    for (i in 0 until deliveryBenefitList.length()) {
+                        val deliveryBenefit = deliveryBenefitList.optJSONObject(i) ?: continue
+                        if (!deliveryBenefit.optString("benefitType").equals("IEP_REQUEST", true)) {
+                            continue
+                        }
+                        val tracer = deliveryBenefit.optString("iepTaskTracer")
+                        val taskType = deliveryBenefit.optString("iepTaskId")
+                            .ifBlank { extractForestGameCenterTracerField(tracer, "taskType") }
+                        if (taskType.isBlank()) {
+                            continue
+                        }
+                        val sceneCode = extractForestGameCenterTracerField(tracer, "sceneCode")
+                            .ifBlank { FOREST_GAME_CENTER_NEW_USER_SCENE_CODE }
+                        val taskStatus = extractForestGameCenterTracerField(tracer, "taskStatus")
+                            .ifBlank { deliveryBenefit.optString("taskStatus") }
+                            .ifBlank { "TODO" }
+                        val rightTimes = optForestGameCenterInt(deliveryBenefit, "rightTimes")
+                        val rightTimesLimit = optForestGameCenterInt(deliveryBenefit, "rightTimesLimit")
+                        if (isForestGameCenterDeliveryTerminal(taskStatus) ||
+                            (rightTimesLimit > 0 && rightTimes >= rightTimesLimit)
+                        ) {
+                            continue
+                        }
+                        val key = "$sourceName#$sceneCode#$taskType#$appId"
+                        deliveryTasks.putIfAbsent(
+                            key,
+                            EnergyRainGameCenterDeliveryTask(
+                                sourceName = sourceName,
+                                sceneCode = sceneCode,
+                                taskType = taskType,
+                                status = taskStatus,
+                                title = title,
+                                appId = appId,
+                                awardCount = optForestGameCenterInt(deliveryBenefit, "awardCount"),
+                                rightTimes = rightTimes,
+                                rightTimesLimit = rightTimesLimit
+                            )
+                        )
+                    }
+                }
+                val keys = source.keys()
+                while (keys.hasNext()) {
+                    appendEnergyRainGameCenterDeliveryTasks(
+                        sourceName,
+                        source.opt(keys.next()),
+                        requestAppId,
+                        deliveryTasks
+                    )
+                }
+            }
+
+            is JSONArray -> {
+                for (index in 0 until source.length()) {
+                    appendEnergyRainGameCenterDeliveryTasks(
+                        sourceName,
+                        source.opt(index),
+                        requestAppId,
+                        deliveryTasks
+                    )
+                }
+            }
+        }
+    }
+
+    private fun closeEnergyRainGameCenterDeliveryTasks(
+        request: EnergyRainCoroutine.EnergyRainGameDriveRequest,
+        deliveryTasks: List<EnergyRainGameCenterDeliveryTask>
+    ): EnergyRainCoroutine.EnergyRainGameDriveResult? {
+        if (deliveryTasks.isEmpty()) {
+            return null
+        }
+        for (task in deliveryTasks) {
+            val quotaSuffix = if (task.rightTimesLimit > 0) {
+                " quota=${task.rightTimes}/${task.rightTimesLimit}"
+            } else {
+                ""
+            }
+            Log.forest(
+                "能量雨游戏任务[${request.gameTaskTitle}]执行游戏中心IEP候选" +
+                    "[${task.title}][${task.sceneCode}/${task.taskType}] status=${task.status}$quotaSuffix"
+            )
+            val finishResponseText = AntForestRpcCall.finishTaskopengreen(
+                task.taskType,
+                task.sceneCode,
+                "task_entry"
+            )
+            if (finishResponseText.isBlank()) {
+                Log.forest("游戏中心IEP候选[${task.title}]opengreen完成RPC返回空，继续后续候选")
+                continue
+            }
+            val finishResponse = JSONObject(finishResponseText)
+            when {
+                isAntiepSuccess(finishResponse) -> {
+                    receiveEnergyRainGameCenterDeliveryAward(task)
+                    return EnergyRainCoroutine.EnergyRainGameDriveResult(
+                        EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED,
+                        "游戏中心IEP任务已提交: ${task.sceneCode}/${task.taskType}"
+                    )
+                }
+
+                isForestTaskAlreadyHandled(finishResponse) -> {
+                    return EnergyRainCoroutine.EnergyRainGameDriveResult(
+                        EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED,
+                        "游戏中心IEP任务已处理: ${task.sceneCode}/${task.taskType}"
+                    )
+                }
+
+                else -> {
+                    when (classifyForestTaskFailure(finishResponse)) {
+                        TaskRpcFailureType.TERMINAL_DONE -> return EnergyRainCoroutine.EnergyRainGameDriveResult(
+                            EnergyRainCoroutine.EnergyRainGameDriveStatus.PROGRESSED,
+                            "游戏中心IEP任务已处理: ${task.sceneCode}/${task.taskType}"
+                        )
+
+                        TaskRpcFailureType.RETRYABLE_RPC,
+                        TaskRpcFailureType.BUSINESS_LIMIT,
+                        TaskRpcFailureType.UNSUPPORTED_NO_CLOSURE,
+                        TaskRpcFailureType.NON_RETRYABLE_INVALID,
+                        TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW -> Unit
+                    }
+                    Log.forest(
+                        "游戏中心IEP候选[${task.title}]opengreen完成RPC未形成确认进展: " +
+                            extractForestTaskFailureMessage(finishResponse)
+                    )
+                }
+            }
+        }
+        return EnergyRainCoroutine.EnergyRainGameDriveResult(
+            EnergyRainCoroutine.EnergyRainGameDriveStatus.NO_PROGRESS,
+            "游戏中心IEP候选本轮未形成确认进展"
+        )
+    }
+
+    private fun receiveEnergyRainGameCenterDeliveryAward(
+        task: EnergyRainGameCenterDeliveryTask
+    ): Boolean {
+        val responseText = AntForestRpcCall.receiveTaskAwardopengreen(
+            AntForestRpcCall.OPEN_GREEN_RIGHTS_SOURCE,
+            task.sceneCode,
+            task.taskType
+        )
+        if (responseText.isBlank()) {
+            Log.forest("游戏中心IEP候选[${task.title}]领奖RPC返回空，交由后续回查确认")
+            return false
+        }
+        val response = JSONObject(responseText)
+        return when {
+            isAntiepSuccess(response) -> {
+                val awardSuffix = task.awardCount.takeIf { it > 0 }?.let { "#$it" }.orEmpty()
+                Log.forest("游戏中心IEP奖励🎮[${task.title}]$awardSuffix")
+                true
+            }
+
+            isForestTaskAlreadyHandled(response) -> {
+                Log.forest("游戏中心IEP候选[${task.title}]奖励已处理")
+                true
+            }
+
+            else -> {
+                Log.forest(
+                    "游戏中心IEP候选[${task.title}]领奖未形成确认进展: " +
+                        extractForestTaskFailureMessage(response)
+                )
+                false
+            }
+        }
+    }
+
+    private fun isForestGameCenterDeliveryTerminal(status: String): Boolean {
+        return FOREST_GAME_CENTER_DELIVERY_TERMINAL_STATUSES.any { it.equals(status, true) }
+    }
+
+    private fun optForestGameCenterInt(source: JSONObject, key: String): Int {
+        return when (val value = source.opt(key)) {
+            is Number -> value.toInt()
+            is String -> value.toIntOrNull() ?: 0
+            else -> 0
         }
     }
 
@@ -8613,6 +8898,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         private const val FOREST_LEYUAN_DAILY_TASK_SCENE_CODE = "ANTFOREST_LEYUAN_DAILY_TASK"
         private const val FOREST_LEYUAN_OPEN_BOX_TASK_TYPE = "OPEN_BOX_FIN"
         private const val FOREST_LEYUAN_OPEN_BOX_TARGET_COUNT = 10
+        private const val FOREST_GAME_CENTER_NEW_USER_SCENE_CODE = "ANTFOREST_GAME_CENTER_NEW_USER"
         private const val ONE_CLICK_WATERING_TASK_TYPE = "ONE_CLICK_WATERING_V1"
         private const val LEGACY_FOREST_GAME_TASK_TYPE = "mokuai_senlin_hlz"
         private const val VITALITY_ENERGY_RAIN_RIGHTS_ID = "VITALITY_ENERGYRAIN_3DAYS"
@@ -8621,6 +8907,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         private const val ROB_MULTIPLIER_FACTOR_EPS = 0.0001
         private val FOREST_LEYUAN_REWARD_READY_STATUSES = setOf("FINISHED", "WAIT_RECEIVE", "TO_RECEIVE")
         private val FOREST_LEYUAN_PROGRESS_PENDING_STATUSES = setOf("TODO", "WAIT_COMPLETE", "NOT_TRIGGER")
+        private val FOREST_GAME_CENTER_DELIVERY_TERMINAL_STATUSES = setOf(
+            "RECEIVED",
+            "HAS_RECEIVED",
+            "DONE",
+            "SUCCESS",
+            "COMPLETED"
+        )
         private val APP_ID_QUERY_REGEX = Regex("""(?:^|[?&])appId=([0-9]+)""")
 
         @JvmField

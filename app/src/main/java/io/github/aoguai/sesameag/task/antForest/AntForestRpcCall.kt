@@ -870,6 +870,42 @@ object AntForestRpcCall {
         )
     }
 
+    internal fun guideEnergyRainEnd(currentEnergy: Int, source: String = ENERGY_RAIN_GAME_ENTRY_SOURCE): String {
+        val arg = JSONObject().apply {
+            put(
+                "bizParam",
+                JSONObject().apply {
+                    put("currentEnergy", currentEnergy)
+                }
+            )
+            put("bizType", "ANTFOREST")
+            put(
+                "chInfoList",
+                JSONArray().put(
+                    JSONObject().apply {
+                        put("chParam", source)
+                        put("chType", "LINK_SOURCE")
+                    }
+                )
+            )
+            put("eventCode", "PWGROWTH_FOREST_RAIN_END")
+            put("fromPageTag", "FOREST_RAIN_END_PAGE")
+            put("requestType", "RPC")
+            put("source", "ANTFOREST")
+        }
+        return RequestManager.requestString(
+            "com.alipay.antpwgrowth.guideDecisionEntrance",
+            JSONArray().put(arg).toString()
+        )
+    }
+
+    internal fun queryEnergyRainRanking(startPoint: String = "0"): String {
+        return RequestManager.requestString(
+            "alipay.antforest.forest.h5.queryEnergyRainRanking",
+            "[{\"startPoint\":\"$startPoint\",\"version\":\"$ENERGY_RAIN_VERSION\"}]"
+        )
+    }
+
     @JvmStatic
     fun queryEnergyRainCanGrantList(): String {
         return RequestManager.requestString("alipay.antforest.forest.h5.queryEnergyRainCanGrantList", "[{}]")
@@ -1819,16 +1855,22 @@ object AntForestRpcCall {
 
     @JvmStatic
     @Throws(JSONException::class)
-    fun finishTaskopengreen(taskType: String, sceneCode: String): String {
+    fun finishTaskopengreen(taskType: String, sceneCode: String, source: String = "task_entry"): String {
         val params = JSONObject().apply {
             put("outBizNo", taskType + RandomUtil.getRandomTag())
             put("requestType", "RPC")
             put("sceneCode", sceneCode)
-            put("source", "task_entry")
+            put("source", source)
             put("taskType", taskType)
         }
         Log.forest("finishTaskopengreen - 任务: $taskType")
-        return RequestManager.requestString("com.alipay.antieptask.finishTaskopengreen", "[$params]")
+        return RequestManager.requestString(
+            RpcEntity(
+                "com.alipay.antieptask.finishTaskopengreen",
+                "[$params]",
+                headers = forestHeaders(source)
+            )
+        )
     }
 
     @JvmStatic
