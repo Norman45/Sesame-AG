@@ -39,6 +39,7 @@ object PersistentScheduleRegistry {
     private var cache: MutableList<PersistentSchedule>? = null
     private val registryMutationLock = Any()
     private val registryLockDepth = ThreadLocal<Int>()
+    private var recoveredExecutionsInProcess = false
 
     data class ReconcileResult(
         val dueSchedules: List<PersistentSchedule>,
@@ -277,6 +278,27 @@ object PersistentScheduleRegistry {
         context?.let { ctx -> SystemWakeScheduler.schedule(ctx, PersistentSchedule(), silent = true) }
     }
 
+    /** 在宿主发布首个运行时会话前调用；恢复广播不能重置当前进程的 Worker。 */
+    internal fun recoverInterruptedExecutions(ownerUserId: String, sessionEpoch: Long) = withRegistryLock {
+        if (recoveredExecutionsInProcess || ownerUserId.isBlank() || sessionEpoch <= 0L || !ensureStorage()) {
+            return@withRegistryLock
+        }
+        val now = System.currentTimeMillis()
+        val schedules = loadMutable()
+        val recovered = schedules.map { schedule ->
+            if (schedule.ownerUserId?.trim() == ownerUserId.trim() &&
+                schedule.sessionEpoch == sessionEpoch && schedule.state in activeModuleChildStates
+            ) {
+                // QUEUED 也可能已交给 Worker，不能用旧执行态推断 RPC 未提交。
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
+                Log.error(TAG, "持久任务因宿主进程退出而中断[${schedule.name}] id=${schedule.id} state=${schedule.state}，保留业务待确认数据")
+                schedule.withFailure("host_process_restarted_unconfirmed", now)
+            } else schedule
+        }
+        if (recovered != schedules) save(recovered)
+        recoveredExecutionsInProcess = true
+    }
+
     fun activateSession(
         context: Context,
         ownerUserId: String,
@@ -379,14 +401,15 @@ object PersistentScheduleRegistry {
         id: String,
         now: Long = System.currentTimeMillis(),
         source: String = "registry",
-    ) {
-        updateSchedule(id, source) { schedule ->
-            if (schedule.state == PersistentScheduleState.QUEUED || schedule.state == PersistentScheduleState.SCHEDULED) {
-                schedule.withRunning(now)
-            } else {
-                schedule
-            }
-        }
+        expected: PersistentSchedule? = null,
+    ): Boolean = withRegistryLock {
+        val current = get(id) ?: return@withRegistryLock false
+        if (expected != null && current != expected) return@withRegistryLock false
+        if (current.state != PersistentScheduleState.QUEUED &&
+            (expected != null || current.state != PersistentScheduleState.SCHEDULED)
+        ) return@withRegistryLock false
+        updateSchedule(id, source) { it.withRunning(now) }
+        true
     }
 
     fun beginDeliveryWait(
@@ -619,10 +642,8 @@ object PersistentScheduleRegistry {
                         retained.add(schedule)
                         Log.record(TAG, "发现到期持久任务[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
                     } else {
-                        expired++
-                        SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
-                        retained.add(schedule.withScheduleState(PersistentScheduleState.EXPIRED, now))
-                        Log.runtime(TAG, "恢复重排跳过已到期持久任务[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
+                        retained.add(schedule)
+                        Log.runtime(TAG, "恢复重排保留窗口内到期任务[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
                     }
                 } else {
                     expired++
@@ -645,7 +666,7 @@ object PersistentScheduleRegistry {
         save(retained)
         val replanSucceeded =
             SystemWakeScheduler.schedule(context, retained.firstOrNull() ?: PersistentSchedule(), silent = true)
-        if (replanSucceeded && retained.any { it.state == PersistentScheduleState.SCHEDULED && it.triggerAtMs > now }) {
+        if (replanSucceeded && retained.any { it.state == PersistentScheduleState.SCHEDULED }) {
             rescheduled = 1
         }
         return ReconcileResult(
