@@ -108,24 +108,23 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         runSessionOwnerUserId = activeSession?.userId
         runSessionEpoch = activeSession?.sessionEpoch ?: 0L
 
-        // 【互斥检查】如果手动任务流正在运行，则跳过本次自动执行
-        if (ManualTask.isManualRunning) {
-            Log.record(TAG, "⏸ 检测到“手动庄园任务流”正在运行中，跳过本次自动任务调度")
-            return@coroutineScope
-        }
-
         val startSessionCheck = runSessionCheck()
         if (startSessionCheck !is AccountSessionCheck.Current) {
             logSessionInvalid("runner_start", startSessionCheck)
             return@coroutineScope
         }
 
-        if (isFirst) {
-            ApplicationHook.updateDay()
-            resetCounters()
-        }
-
         try {
+            // 手动任务优先，但合法跳过仍须经过 finally 安排下一轮。
+            if (ManualTask.isManualRunning) {
+                Log.record(TAG, "⏸ 检测到“手动庄园任务流”正在运行中，跳过本轮自动执行并保留下轮调度")
+                return@coroutineScope
+            }
+            if (isFirst) {
+                ApplicationHook.updateDay()
+                resetCounters()
+            }
+
             maxConcurrency = BaseModel.taskMaxConcurrency.value ?: DEFAULT_MAX_CONCURRENCY
             taskConcurrencyLimiter = Semaphore(maxConcurrency)
             longRunningTaskLimiter = Semaphore(1)

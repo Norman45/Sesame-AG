@@ -51,7 +51,7 @@ object ScheduledTaskRouter {
 
     suspend fun fireDueFromModule(context: Context, source: String): Int = deliveryMutex.withLock {
         val now = System.currentTimeMillis()
-        val due = PersistentScheduleRegistry.list().filter {
+        val due = PersistentScheduleRegistry.listFresh().filter {
             it.state == PersistentScheduleState.SCHEDULED && it.triggerAtMs <= now
         }.sortedBy { it.deadlineAtMs() }
         try {
@@ -76,7 +76,7 @@ object ScheduledTaskRouter {
             if (deliverable.isEmpty()) return@withLock due.size
             val identity = AccountSessionCoordinator.currentOrPersistedSessionIdentity()
             val readiness = HookReadyChecker.probe(context, identity?.userId.orEmpty())
-            var launchAttempted = PersistentScheduleRegistry.list().any {
+            var launchAttempted = PersistentScheduleRegistry.listFresh().any {
                 it.state == PersistentScheduleState.SCHEDULED && it.lastError == "launch_pending"
             }
             for (schedule in deliverable) {
