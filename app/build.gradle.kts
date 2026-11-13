@@ -98,9 +98,13 @@ android {
     }
 
     signingConfigs {
-        getByName("debug") {
-        }
+    getByName("debug") {
+        storeFile = file("my-release.keystore")
+        storePassword = "mypassword123"
+        keyAlias = "mykey"
+        keyPassword = "mypassword123"
     }
+}
 
     buildTypes {
         getByName("debug") {
