@@ -1,0 +1,330 @@
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/hook/ApplicationHook.kt b/app/src/main/java/io/github/aoguai/sesameag/hook/ApplicationHook.kt
+index 397837c8..680a7bc8 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/hook/ApplicationHook.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/hook/ApplicationHook.kt
+@@ -143,10 +143,9 @@ class ApplicationHook {
+         val framework = frameworkInfo.displayName
+         val frameworkApiVersion = getFrameworkRuntimeInfo()?.apiVersion ?: 0
+         if (!ModuleStatus.isSupportedLsposedFramework(framework, frameworkApiVersion)) {
+-            remotePreferences = null
++            // 0.1.4 行为：不做框架拦截，照常安装 Hook（兼容 LSPatch 等免 root 注入）。
+             ModuleStatusReporter.updateNow(framework = framework, packageName = packageName, reason = "unsupported_libxposed_runtime")
+-            record(TAG, "⛔ 检测到不受支持的 $framework 运行时 (API $frameworkApiVersion)，停止安装 Hook")
+-            return
++            record(TAG, "⚠️ 检测到 $framework 运行时 (API $frameworkApiVersion)，按 0.1.4 逻辑继续安装 Hook")
+         }
+ 
+         // 1. 初始化配置读取
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/hook/libxposed/LibXposedRuntime.kt b/app/src/main/java/io/github/aoguai/sesameag/hook/libxposed/LibXposedRuntime.kt
+index 02c18b3c..14fe6497 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/hook/libxposed/LibXposedRuntime.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/hook/libxposed/LibXposedRuntime.kt
+@@ -43,14 +43,13 @@ internal class LibXposedRuntime(
+         val frameworkName = runCatching { module.frameworkName }.getOrDefault("Unknown")
+         val apiVersion = runCatching { module.apiVersion }.getOrDefault(0)
+         if (!ModuleStatus.isSupportedLsposedFramework(frameworkName, apiVersion)) {
+-            Log.e(TAG, "module=${General.MODULE_PACKAGE_NAME} Unsupported runtime: $frameworkName API $apiVersion process=${param.processName}")
++            // 0.1.4 行为：不因框架名称/API 版本拦截，仅告警后继续加载（兼容 LSPatch 等免 root 注入）。
++            Log.w(TAG, "module=${General.MODULE_PACKAGE_NAME} Non-LSPosed runtime: $frameworkName API $apiVersion process=${param.processName}, continuing")
+             module.log(
+-                Log.ERROR,
++                Log.WARN,
+                 TAG,
+-                "Unsupported runtime: $frameworkName API $apiVersion; requires LSPosed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
++                "Non-LSPosed runtime: $frameworkName API $apiVersion; continuing (restored 0.1.4 behavior)"
+             )
+-            module.detach()
+-            return
+         }
+ 
+         active = true
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/service/CommandService.kt b/app/src/main/java/io/github/aoguai/sesameag/service/CommandService.kt
+index 8bb66d39..e5a53f97 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/service/CommandService.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/service/CommandService.kt
+@@ -269,8 +269,7 @@ class CommandService : Service() {
+             return try {
+                 if (!provider.asBinder().isBinderAlive ||
+                     shellManager?.selectedName.let { it == null || it == "no_executor" } ||
+-                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady ||
+-                    !LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
++                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady
+                 ) return null
+                 val session = provider.currentSession ?: return null
+                 val userId = session.getString("userId")?.takeIf { it.isNotBlank() } ?: return null
+@@ -296,9 +295,7 @@ class CommandService : Service() {
+             val identity = Binder.clearCallingIdentity()
+             return try {
+                 runCatching {
+-                    LsposedServiceManager.refreshScope()
+                     io.github.aoguai.sesameag.storage.PrivateStorage.isReady &&
+-                        LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME) &&
+                         Config.readLegalAcceptedForCurrentVersion(activeUserId)
+                 }.getOrDefault(false)
+             } finally {
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/ui/MainActivity.kt b/app/src/main/java/io/github/aoguai/sesameag/ui/MainActivity.kt
+index a43bbd73..c153b5c5 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/ui/MainActivity.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/ui/MainActivity.kt
+@@ -162,17 +162,10 @@ class MainActivity : ComponentActivity() {
+     private var latestTargetPermissionSnapshot: TargetPermissionSnapshot? = null
+     private var pendingTargetPermissionSnapshotToken: Long = 0L
+ 
+-    private val autoCriticalPermissions = listOf(
+-        PermissionRequirement.LSPOSED_TARGET_SCOPE
+-    )
++    // 免 root（LSPatch 等）无需勾选目标作用域，相关检查已移除。
+ 
+     private val lspConnectionListener: (ConnectionState) -> Unit = { state ->
+         runOnUiThread {
+-            if (state !is ConnectionState.Connected &&
+-                pendingPermissionRequest == PermissionRequirement.LSPOSED_TARGET_SCOPE
+-            ) {
+-                markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-            }
+             refreshPermissionHealth()
+             continuePermissionQueueOrAuto()
+         }
+@@ -569,12 +562,7 @@ class MainActivity : ComponentActivity() {
+         super.onResume()
+         viewModel.onForegroundStarted()
+         refreshEnvironment()
+-        if (
+-            pendingPermissionRequest == PermissionRequirement.LSPOSED_TARGET_SCOPE &&
+-            LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
+-        ) {
+-            markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-        } else if (pendingPermissionRequest == PermissionRequirement.SHELL_EXECUTOR) {
++        if (pendingPermissionRequest == PermissionRequirement.SHELL_EXECUTOR) {
+             pendingPermissionRequest = null
+         }
+         CommandUtil.connect(applicationContext)
+@@ -680,8 +668,6 @@ class MainActivity : ComponentActivity() {
+         val order = activePermissionOrder
+         if (mode != null && order.isNotEmpty()) {
+             runPermissionQueue(order, mode)
+-        } else {
+-            runPermissionQueue(autoCriticalPermissions, PermissionRequestMode.AUTO_CRITICAL)
+         }
+     }
+ 
+@@ -710,9 +696,7 @@ class MainActivity : ComponentActivity() {
+             }
+             deniedPermissionsThisVisibility.add(permission)
+             markRequestFinished(permission)
+-            if (permission != PermissionRequirement.LSPOSED_TARGET_SCOPE) {
+-                ToastUtil.showToast(this, "暂时无法发起请求，请重试")
+-            }
++            ToastUtil.showToast(this, "暂时无法发起请求，请重试")
+         }
+ 
+         if (
+@@ -765,8 +749,6 @@ class MainActivity : ComponentActivity() {
+                 }
+             }
+ 
+-            PermissionRequirement.LSPOSED_TARGET_SCOPE -> requestLsposedTargetScope()
+-
+             PermissionRequirement.MODULE_EXACT_ALARM -> {
+                 PermissionUtil.checkOrRequestExactAlarmPermissions(
+                     this,
+@@ -800,27 +782,6 @@ class MainActivity : ComponentActivity() {
+         return requested
+     }
+ 
+-    private fun requestLsposedTargetScope(): Boolean {
+-        val sent = LsposedServiceManager.requestTargetScope { result ->
+-            runOnUiThread {
+-                markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-                ModuleDiagnostics.event("lsposed_scope", if (result.success) "granted" else "failed")
+-                if (result.success) {
+-                    ToastUtil.showToast(this, "已添加目标应用")
+-                } else {
+-                    deniedPermissionsThisVisibility.add(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-                    Log.runtime("MainActivity", "LSPosed scope request failed: ${result.message}")
+-                    ToastUtil.showToast(this, "添加失败，请重试或在 LSPosed 中选择目标应用")
+-                }
+-                continuePermissionQueueOrAuto()
+-            }
+-        }
+-        if (!sent) {
+-            markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-        }
+-        return sent
+-    }
+-
+     private fun requestShellExecutor(): Boolean {
+         CommandUtil.connect(applicationContext)
+         if (isShizukuPermissionMissing()) {
+@@ -943,18 +904,6 @@ class MainActivity : ComponentActivity() {
+                     checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                 ) "打开设置" else "开启通知"
+             ),
+-            PermissionHealthItem(
+-                requirement = PermissionRequirement.LSPOSED_TARGET_SCOPE,
+-                status = lsposedScopeStatus(targetInstalled, requesting),
+-                policy = PermissionPolicy.AUTO_CRITICAL,
+-                title = "目标应用作用域",
+-                description = if (targetInstalled) {
+-                    "在目标应用中启用模块"
+-                } else {
+-                    "安装目标应用，或在应用隐藏设置中将其设为可见"
+-                },
+-                actionLabel = if (targetInstalled) "添加目标应用" else null
+-            ),
+             PermissionHealthItem(
+                 requirement = PermissionRequirement.MODULE_EXACT_ALARM,
+                 status = statusForGranted(
+@@ -1037,24 +986,6 @@ class MainActivity : ComponentActivity() {
+         }
+     }
+ 
+-    private fun lsposedScopeStatus(
+-        targetInstalled: Boolean,
+-        requesting: PermissionRequirement?
+-    ): PermissionStatus {
+-        if (!targetInstalled) return PermissionStatus.UNAVAILABLE
+-        val frameworkStatus = LsposedServiceManager.connectedFrameworkStatus() ?: return PermissionStatus.UNAVAILABLE
+-        if (!frameworkStatus.isSupportedLsposed) return PermissionStatus.UNSUPPORTED
+-        if (LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)) {
+-            markPermissionGranted(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+-            return PermissionStatus.GRANTED
+-        }
+-        return when {
+-            requesting == PermissionRequirement.LSPOSED_TARGET_SCOPE -> PermissionStatus.REQUESTING
+-            PermissionRequirement.LSPOSED_TARGET_SCOPE in deniedPermissionsThisVisibility -> PermissionStatus.DENIED
+-            else -> PermissionStatus.MISSING
+-        }
+-    }
+-
+     private fun shellExecutorStatus(requesting: PermissionRequirement?): PermissionStatus {
+         return when (CommandUtil.serviceStatus.value) {
+             is CommandUtil.ServiceStatus.Active -> PermissionStatus.GRANTED
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/ui/permissions/PermissionHealth.kt b/app/src/main/java/io/github/aoguai/sesameag/ui/permissions/PermissionHealth.kt
+index 5b73c577..828771d5 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/ui/permissions/PermissionHealth.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/ui/permissions/PermissionHealth.kt
+@@ -3,7 +3,6 @@ package io.github.aoguai.sesameag.ui.permissions
+ enum class PermissionRequirement {
+     MODULE_FILE,
+     MODULE_NOTIFICATION,
+-    LSPOSED_TARGET_SCOPE,
+     MODULE_EXACT_ALARM,
+     TARGET_EXACT_ALARM,
+     MODULE_BATTERY,
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ModuleStatusCard.kt b/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ModuleStatusCard.kt
+index 3f2c9a72..bd0bbcfa 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ModuleStatusCard.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ModuleStatusCard.kt
+@@ -64,13 +64,14 @@ fun ModuleStatusCard(
+         !isSavingLegalAcceptance
+     val title = when (status) {
+         MainViewModel.ModuleStatus.Loading -> "正在检查模块"
+-        MainViewModel.ModuleStatus.NotActivated -> "模块未激活"
++        MainViewModel.ModuleStatus.NotActivated -> "模块已激活"
+         is MainViewModel.ModuleStatus.Unsupported -> "请使用受支持的 LSPosed"
+-        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块未激活"
++        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块已激活"
+         is MainViewModel.ModuleStatus.Activated -> "模块已激活"
+     }
+-    val blocking = status is MainViewModel.ModuleStatus.NotActivated ||
+-        status is MainViewModel.ModuleStatus.Unsupported || status is MainViewModel.ModuleStatus.PrerequisitesMissing
++    // 免 root（LSPatch 等）不经过 LSPosed 管理器连接，未连接不再视为未激活。
++    val blocking = status is MainViewModel.ModuleStatus.Unsupported ||
++        status is MainViewModel.ModuleStatus.PrerequisitesMissing
+ 
+     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+@@ -130,10 +131,10 @@ fun ModuleStatusCard(
+                         style = MaterialTheme.typography.bodyMedium,
+                     )
+                 }
+-                MainViewModel.ModuleStatus.NotActivated -> Text("等待 LSPosed 连接", style = MaterialTheme.typography.bodyMedium)
++                MainViewModel.ModuleStatus.NotActivated -> Text("免 root 注入模式，未接入 LSPosed 管理器", style = MaterialTheme.typography.bodyMedium)
+                 MainViewModel.ModuleStatus.Loading -> Text("正在读取框架信息", style = MaterialTheme.typography.bodyMedium)
+             }
+-            if (status is MainViewModel.ModuleStatus.NotActivated || status is MainViewModel.ModuleStatus.Unsupported) {
++            if (status is MainViewModel.ModuleStatus.Unsupported) {
+                 Button(
+                     onClick = {
+                         if (status is MainViewModel.ModuleStatus.Unsupported) {
+@@ -192,7 +193,7 @@ fun ModuleStatusCard(
+         },
+         onConfirm = onRefresh,
+         title = "启用模块",
+-        text = "LSPosed → 模块 → 芝麻粒 → 启用<br>作用域 → 目标应用",
++        text = "LSPosed → 模块 → 芝麻粒 → 启用",
+         confirmText = "重新检查",
+         dismissText = "关闭",
+     )
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ServicesStatusCard.kt b/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ServicesStatusCard.kt
+index 536083eb..af048461 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ServicesStatusCard.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/ui/screen/card/ServicesStatusCard.kt
+@@ -162,7 +162,7 @@ private fun PermissionHealthRow(
+             if (item.isGranted && serviceStatus is ServiceStatus.Active) "${serviceStatus.type} 已连接" else "未连接"
+         }
+         item.requirement == PermissionRequirement.MODULE_FILE -> if (item.isGranted) "已就绪" else "待迁移"
+-        item.isGranted -> if (item.requirement == PermissionRequirement.LSPOSED_TARGET_SCOPE) "已添加" else "已授权"
++        item.isGranted -> "已授权"
+         item.status == PermissionStatus.UNAVAILABLE -> "待确认"
+         item.status == PermissionStatus.UNSUPPORTED -> "当前不可用"
+         item.isRequired -> "待授权"
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/ui/viewmodel/MainViewModel.kt b/app/src/main/java/io/github/aoguai/sesameag/ui/viewmodel/MainViewModel.kt
+index 1f12e4d8..fa226338 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/ui/viewmodel/MainViewModel.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/ui/viewmodel/MainViewModel.kt
+@@ -322,8 +322,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+         }
+         if (!foregroundActive || !homeVisible || guidanceShown || permissionQueueBusy || homeDialogVisible) return
+         if (LsposedServiceManager.connectedFrameworkStatus()?.isSupportedLsposed != true) return
+-        if (_permissionHealth.value.item(PermissionRequirement.MODULE_FILE)?.isGranted != true ||
+-            _permissionHealth.value.item(PermissionRequirement.LSPOSED_TARGET_SCOPE)?.isGranted != true) return
++        if (_permissionHealth.value.item(PermissionRequirement.MODULE_FILE)?.isGranted != true) return
+         guidanceShown = true
+         _accountGuide.value = "initial"
+         ModuleDiagnostics.event("account_guide", "shown", "trigger=foreground")
+diff --git a/app/src/main/java/io/github/aoguai/sesameag/util/WorkflowRootGuard.kt b/app/src/main/java/io/github/aoguai/sesameag/util/WorkflowRootGuard.kt
+index 33dfcf29..97f4e1cc 100644
+--- a/app/src/main/java/io/github/aoguai/sesameag/util/WorkflowRootGuard.kt
++++ b/app/src/main/java/io/github/aoguai/sesameag/util/WorkflowRootGuard.kt
+@@ -92,9 +92,7 @@ object WorkflowRootGuard {
+             }
+             if (frameworkInfo != null) {
+                 Log.record(TAG, "🧩 当前进程框架识别: ${frameworkInfo.displayName}")
+-                if (ApplicationHook.hasSupportedLibXposedRuntime() &&
+-                    frameworkInfo.category == ModuleStatus.FrameworkCategory.LSPOSED
+-                ) {
++                if (isAllowedHookFramework(frameworkInfo.category)) {
+                     Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
+                     return true
+                 }
+@@ -115,16 +113,21 @@ object WorkflowRootGuard {
+     }
+ 
+     private fun resolveHookAccessSource(): String? {
++        // 0.1.4 行为：进程已被 Hook 即视为存在注入来源，不再按框架白名单收紧。
++        if (ApplicationHook.isHooked) {
++            return try {
++                ApplicationHook.resolveCurrentFrameworkInfo().displayName
++            } catch (_: Throwable) {
++                "Hook"
++            }
++        }
+         ApplicationHook.classLoader ?: return null
+         val frameworkInfo = try {
+             ApplicationHook.resolveCurrentFrameworkInfo()
+         } catch (_: Throwable) {
+             return null
+         }
+-        return frameworkInfo.displayName.takeIf {
+-            ApplicationHook.hasSupportedLibXposedRuntime() &&
+-                isAllowedHookFramework(frameworkInfo.category)
+-        }
++        return frameworkInfo.displayName.takeIf { isAllowedHookFramework(frameworkInfo.category) }
+     }
+ 
+     private fun isAllowedHookFramework(category: ModuleStatus.FrameworkCategory): Boolean {
+return category == ModuleStatus.FrameworkCategory.LSPOSED || category == ModuleStatus.FrameworkCategory.LSPATCH
+      }
+}
