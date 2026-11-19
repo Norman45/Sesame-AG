@@ -100,6 +100,16 @@ android {
     signingConfigs {
         getByName("debug") {
         }
+        // CI 通过环境变量注入正式签名钥匙；本地无变量时回退 debug 钥匙。
+        val injectedKeystore = System.getenv("KEYSTORE_FILE")
+        if (!injectedKeystore.isNullOrBlank() && file(injectedKeystore).isFile) {
+            create("releaseUpload") {
+                storeFile = file(injectedKeystore)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS") ?: "release"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -118,7 +128,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("releaseUpload") ?: signingConfigs.getByName("debug")
         }
     }
 
