@@ -22,6 +22,7 @@ interface ICommandService {
     boolean isExecutionAllowed(String userId);
     PendingIntent getPersistentScheduleAlarmIntent(int lane);
     boolean verifyRuntimeIdentity(int expectedModuleUid, String expectedModuleSourceDir);
+    void setRootlessMode(boolean rootless);
     void setCaptureSessionProvider(ICaptureSession provider);
     Bundle getCaptureSession();
 }
