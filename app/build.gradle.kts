@@ -97,14 +97,25 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // 签名材料不进仓库：keystore 与口令只通过环境变量注入（本地或 CI）。
+    // 未注入时 release 产物为未签名 APK，debug 使用系统默认调试签名。
+    val releaseKeystorePath = System.getenv("KEYSTORE_FILE")
+    val releaseKeystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("KEY_ALIAS") ?: "release"
+    val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+
     signingConfigs {
-    getByName("debug") {
-        storeFile = file("my-release.keystore")
-        storePassword = "mypassword123"
-        keyAlias = "mykey"
-        keyPassword = "mypassword123"
+        if (!releaseKeystorePath.isNullOrBlank() && file(releaseKeystorePath).exists() &&
+            !releaseKeystorePassword.isNullOrEmpty() && !releaseKeyPassword.isNullOrEmpty()
+        ) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
-}
 
     buildTypes {
         getByName("debug") {
@@ -113,14 +124,13 @@ android {
             isShrinkResources = false
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
         }
         getByName("release") {
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
