@@ -3,7 +3,6 @@ package io.github.aoguai.sesameag.ui.permissions
 enum class PermissionRequirement {
     MODULE_FILE,
     MODULE_NOTIFICATION,
-    LSPOSED_TARGET_SCOPE,
     MODULE_EXACT_ALARM,
     TARGET_EXACT_ALARM,
     MODULE_BATTERY,

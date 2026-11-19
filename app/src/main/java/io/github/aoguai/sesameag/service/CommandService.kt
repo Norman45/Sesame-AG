@@ -281,8 +281,7 @@ class CommandService : Service() {
             return try {
                 if (!provider.asBinder().isBinderAlive ||
                     shellManager?.selectedName.let { it == null || it == "no_executor" } ||
-                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady ||
-                    !LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
+                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady
                 ) return null
                 val session = provider.currentSession ?: return null
                 val userId = session.getString("userId")?.takeIf { it.isNotBlank() } ?: return null
@@ -309,9 +308,7 @@ class CommandService : Service() {
             val identity = Binder.clearCallingIdentity()
             return try {
                 runCatching {
-                    LsposedServiceManager.refreshScope()
                     io.github.aoguai.sesameag.storage.PrivateStorage.isReady &&
-                        LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME) &&
                         Config.readLegalAcceptedForCurrentVersion(activeUserId)
                 }.getOrDefault(false)
             } finally {
