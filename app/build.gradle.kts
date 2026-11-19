@@ -126,6 +126,8 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         getByName("release") {
+            // 免 root 构建标记：版本号后追加 -ns，便于与需要 Root/Shizuku 的正式包区分。
+            versionNameSuffix = "-ns"
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true

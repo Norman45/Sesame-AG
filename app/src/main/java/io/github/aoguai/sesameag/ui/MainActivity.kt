@@ -327,6 +327,7 @@ class MainActivity : ComponentActivity() {
                     onBackup = { backupLauncher.launch("sesame-backup-${System.currentTimeMillis()}.zip") },
                     onRestore = { confirmStorageRestore.value = true },
                     onAuthorize = { requestPermissionFromCard(PermissionRequirement.SHELL_EXECUTOR) },
+                    onSkip = { lifecycleScope.launch { PrivateStorage.bootstrapEmpty() } },
                     onExit = ::finish,
                 )
                 if (!storageState.ready) return@AppTheme
@@ -960,9 +961,9 @@ class MainActivity : ComponentActivity() {
             PermissionHealthItem(
                 requirement = PermissionRequirement.SHELL_EXECUTOR,
                 status = shellExecutorStatus(requesting),
-                policy = PermissionPolicy.MANUAL_CRITICAL,
+                policy = PermissionPolicy.MANUAL_CARD,
                 title = "Root/Shizuku",
-                description = "Root 与 Shizuku 任一可用即可",
+                description = "可选：迁移旧数据、关闭目标应用等高级操作使用",
                 actionLabel = if (isShizukuPermissionMissing()) "授权 Shizuku" else "连接",
                 requestWhenUnavailable = true
             )

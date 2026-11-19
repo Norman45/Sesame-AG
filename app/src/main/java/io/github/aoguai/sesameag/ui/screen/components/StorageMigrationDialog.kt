@@ -13,7 +13,15 @@ import androidx.compose.ui.unit.dp
 import io.github.aoguai.sesameag.storage.PrivateStorage
 
 @Composable
-fun StorageMigrationDialog(state: PrivateStorage.State, onMigrate: () -> Unit, onBackup: () -> Unit, onRestore: () -> Unit, onAuthorize: () -> Unit, onExit: () -> Unit) {
+fun StorageMigrationDialog(
+    state: PrivateStorage.State,
+    onMigrate: () -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
+    onAuthorize: () -> Unit,
+    onSkip: () -> Unit,
+    onExit: () -> Unit,
+) {
     if (state.ready) return
     AlertDialog(
         onDismissRequest = {},
@@ -28,13 +36,18 @@ fun StorageMigrationDialog(state: PrivateStorage.State, onMigrate: () -> Unit, o
                     LinearProgressIndicator()
                 }
                 if (!state.busy) {
-                    if (state.needsInspection) TextButton(onClick = onAuthorize) { Text("授权 Root / Shizuku") }
-                    else TextButton(onClick = onBackup) { Text("先导出完整备份") }
+                    if (state.needsInspection) {
+                        // 免 root 下跳过旧数据检查，直接使用空白配置；Root/Shizuku 授权改为可选。
+                        TextButton(onClick = onSkip) { Text("跳过迁移，使用空白配置") }
+                        TextButton(onClick = onAuthorize) { Text("授权 Root / Shizuku（可选）") }
+                    } else {
+                        TextButton(onClick = onBackup) { Text("先导出完整备份") }
+                    }
                     TextButton(onClick = onRestore) { Text("从完整备份恢复") }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onMigrate, enabled = !state.busy) { Text(if (state.needsInspection) "重新检查" else "迁移并关闭目标应用") } },
-        dismissButton = { TextButton(onClick = onExit, enabled = !state.busy) { Text("稍后处理") } },
+        dismissButton = { TextButton(onClick = onExit, enabled = !state.busy) { Text("退出") } },
     )
 }
