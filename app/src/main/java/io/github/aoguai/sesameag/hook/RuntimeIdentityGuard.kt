@@ -57,13 +57,32 @@ object RuntimeIdentityGuard {
         val sourceDir = applicationInfo.sourceDir.orEmpty()
         val userId = androidUserId(applicationInfo.uid)
         val decision = when {
-            packageName != General.MODULE_PACKAGE_NAME -> reject("module_package_mismatch")
-            userId != PRIMARY_ANDROID_USER_ID -> reject("module_non_primary_user")
-            sourceDir.isBlank() -> reject("module_source_missing")
-            else -> {
-                state = state.copy(moduleSnapshot = ModuleSnapshot(applicationInfo.uid, sourceDir))
-                accept()
+            packageName == General.MODULE_PACKAGE_NAME -> {
+                when {
+                    userId != PRIMARY_ANDROID_USER_ID -> reject("module_non_primary_user")
+                    sourceDir.isBlank() -> reject("module_source_missing")
+                    else -> {
+                        state = state.copy(moduleSnapshot = ModuleSnapshot(applicationInfo.uid, sourceDir))
+                        accept()
+                    }
+                }
             }
+            packageName == General.PACKAGE_NAME -> {
+                // LSPatch 本地模式把模块内嵌进宿主 APK，onModuleLoaded 上报的是宿主 ApplicationInfo。
+                when {
+                    sourceDir.isBlank() -> reject("module_source_missing")
+                    userId != PRIMARY_ANDROID_USER_ID -> reject("module_non_primary_user")
+                    else -> {
+                        android.util.Log.w(
+                            "ApplicationHook",
+                            "module_identity_embedded_host: module=$packageName uid=${applicationInfo.uid} source=$sourceDir"
+                        )
+                        state = state.copy(moduleSnapshot = ModuleSnapshot(applicationInfo.uid, sourceDir))
+                        accept()
+                    }
+                }
+            }
+            else -> reject("module_package_mismatch")
         }
         if (!decision.accepted) {
             android.util.Log.e("ApplicationHook", "module=${General.MODULE_PACKAGE_NAME} instance_rejected stage=module reason=${decision.reasonCode} " +

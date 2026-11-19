@@ -45,6 +45,18 @@ object PrivateStorage {
             update(State(ready = true, message = "配置可用"))
             return true
         }
+        // 已有配置目录但缺少完成标记时只补标记，绝不覆盖已有账号数据。
+        val hasExistingContent = root.isDirectory && (root.listFiles()?.isNotEmpty() == true)
+        if (hasExistingContent) {
+            return try {
+                StoreAccess.atomicWrite(File(root, ".store-ready"), "ready".byteInputStream())
+                update(State(ready = true, message = "已沿用现有配置目录"))
+                true
+            } catch (failure: Exception) {
+                update(State(message = "私有配置校验失败：${failure.message}", needsInspection = true))
+                false
+            }
+        }
         return try {
             val empty = File(appContext.noBackupFilesDir, "store-initializing")
             if (empty.exists() && !empty.deleteRecursively()) return false
