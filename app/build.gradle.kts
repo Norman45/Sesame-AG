@@ -128,7 +128,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("releaseUpload") ?: signingConfigs.getByName("debug")
+            // release 只认注入的正式钥匙，不再回退 debug 钥匙，避免误发调试签名包。
+            signingConfigs.findByName("releaseUpload")?.let { signingConfig = it }
         }
     }
 
