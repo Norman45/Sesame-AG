@@ -162,6 +162,9 @@ class MainActivity : ComponentActivity() {
     private var latestTargetPermissionSnapshot: TargetPermissionSnapshot? = null
     private var pendingTargetPermissionSnapshotToken: Long = 0L
 
+    // 迁移弹窗点“稍后处理”只关闭弹窗，不退出模块应用。
+    private var migrationDismissed = false
+
     // 免 root（LSPatch 等）无需勾选目标作用域，相关检查已移除。
 
     private val lspConnectionListener: (ConnectionState) -> Unit = { state ->
@@ -321,15 +324,16 @@ class MainActivity : ComponentActivity() {
                     )
                     return@AppTheme
                 }
-                io.github.aoguai.sesameag.ui.screen.components.StorageMigrationDialog(
-                    state = storageState,
-                    onMigrate = { lifecycleScope.launch { if (storageState.needsInspection) PrivateStorage.inspect() else PrivateStorage.migrate() } },
-                    onBackup = { backupLauncher.launch("sesame-backup-${System.currentTimeMillis()}.zip") },
-                    onRestore = { confirmStorageRestore.value = true },
-                    onAuthorize = { requestPermissionFromCard(PermissionRequirement.SHELL_EXECUTOR) },
-                    onSkip = { lifecycleScope.launch { PrivateStorage.bootstrapEmpty() } },
-                    onExit = ::finish,
-                )
+                if (!migrationDismissed) {
+                    io.github.aoguai.sesameag.ui.screen.components.StorageMigrationDialog(
+                        state = storageState,
+                        onMigrate = { lifecycleScope.launch { if (storageState.needsInspection) PrivateStorage.inspect() else PrivateStorage.migrate() } },
+                        onBackup = { backupLauncher.launch("sesame-backup-${System.currentTimeMillis()}.zip") },
+                        onRestore = { confirmStorageRestore.value = true },
+                        onAuthorize = { requestPermissionFromCard(PermissionRequirement.SHELL_EXECUTOR) },
+                        onExit = { migrationDismissed = true },
+                    )
+                }
                 if (!storageState.ready) return@AppTheme
                 MainScreen(
                     oneWord = oneWord,
@@ -961,9 +965,9 @@ class MainActivity : ComponentActivity() {
             PermissionHealthItem(
                 requirement = PermissionRequirement.SHELL_EXECUTOR,
                 status = shellExecutorStatus(requesting),
-                policy = PermissionPolicy.MANUAL_CARD,
+                policy = PermissionPolicy.MANUAL_CRITICAL,
                 title = "Root/Shizuku",
-                description = "可选：迁移旧数据、关闭目标应用等高级操作使用",
+                description = "Root 与 Shizuku 任一可用即可",
                 actionLabel = if (isShizukuPermissionMissing()) "授权 Shizuku" else "连接",
                 requestWhenUnavailable = true
             )
