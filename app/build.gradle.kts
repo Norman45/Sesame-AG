@@ -122,8 +122,6 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         getByName("release") {
-            // 免 root 构建标记：版本号后追加 -ns
-            versionNameSuffix = "-ns"
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
