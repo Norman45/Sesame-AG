@@ -231,7 +231,6 @@ class CommandService : Service() {
                 val moduleApk = moduleInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
                 val targetApk = targetInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
                 val contextApk = applicationInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
-                // 基准改为本机 PackageManager 实测的模块信息，不再信任注入端上报的 uid/sourceDir。
                 val accepted = packageName == General.MODULE_PACKAGE_NAME &&
                     applicationInfo.packageName == General.MODULE_PACKAGE_NAME &&
                     applicationInfo.uid == Process.myUid() &&
@@ -245,7 +244,7 @@ class CommandService : Service() {
                     callerUid == targetInfo.uid &&
                     !targetInfo.sourceDir.isNullOrBlank()
                 if (accepted && (expectedModuleUid != moduleInfo.uid || expectedModuleSourceDir != moduleInfo.sourceDir)) {
-                    // 免 root 注入（LSPatch 等）上报的模块信息与安装包不一致只记录，不影响判定。
+                    // 免 root 注入上报的模块信息与安装包不一致只记录，不影响判定。
                     Log.w(TAG, "runtime_identity_soft_mismatch: injectedUid=$expectedModuleUid injectedSource=$expectedModuleSourceDir " +
                         "installedUid=${moduleInfo.uid} installedSource=${moduleInfo.sourceDir}")
                 }
@@ -263,6 +262,12 @@ class CommandService : Service() {
             }
         }
 
+        override fun setRootlessMode(rootless: Boolean) {
+            enforceTrustedCaller()
+            rootlessMode = rootless
+            Log.w(TAG, "runtime_mode_changed: rootless=$rootless")
+        }
+
         override fun setCaptureSessionProvider(provider: ICaptureSession?) {
             val callerUid = enforceTrustedCaller()
             if (callerUid == Process.myUid()) throw SecurityException("Capture session must come from target")
@@ -276,7 +281,8 @@ class CommandService : Service() {
             return try {
                 if (!provider.asBinder().isBinderAlive ||
                     shellManager?.selectedName.let { it == null || it == "no_executor" } ||
-                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady
+                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady ||
+                    !LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
                 ) return null
                 val session = provider.currentSession ?: return null
                 val userId = session.getString("userId")?.takeIf { it.isNotBlank() } ?: return null
@@ -294,12 +300,6 @@ class CommandService : Service() {
             }
         }
 
-        override fun setRootlessMode(rootless: Boolean) {
-            enforceTrustedCaller()
-            rootlessMode = rootless
-            Log.w(TAG, "runtime_mode_changed: rootless=$rootless")
-        }
-
         override fun isExecutionAllowed(userId: String?): Boolean {
             enforceTrustedCaller()
             val activeUserId = userId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
@@ -309,7 +309,9 @@ class CommandService : Service() {
             val identity = Binder.clearCallingIdentity()
             return try {
                 runCatching {
+                    LsposedServiceManager.refreshScope()
                     io.github.aoguai.sesameag.storage.PrivateStorage.isReady &&
+                        LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME) &&
                         Config.readLegalAcceptedForCurrentVersion(activeUserId)
                 }.getOrDefault(false)
             } finally {

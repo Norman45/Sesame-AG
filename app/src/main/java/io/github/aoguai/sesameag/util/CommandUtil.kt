@@ -90,36 +90,6 @@ object CommandUtil {
         }
     }
 
-    /**
-     * 仅确认能否绑定到模块自身的存储服务（不做存储就绪判定）。
-     *
-     * 免 root 注入（LSPatch 一类）没有 shell 执行器，但模块 App 的 CommandService 是
-     * exported 的普通 bindService，绑定成功即证明注入进程与目标应用 uid 一致。
-     */
-    suspend fun canBindModuleStore(context: Context): Boolean {
-        return try {
-            ensureServiceBound(context.applicationContext ?: context, identityOnly = true)
-        } catch (failure: Exception) {
-            android.util.Log.w(TAG, "模块存储服务绑定失败: ${failure.message}")
-            false
-        }
-    }
-
-    /** 告知模块进程当前为免 root 注入运行，执行条件不再要求 shell 执行器。 */
-    fun setRootlessMode(rootless: Boolean): Boolean {
-        val service = commandService ?: return false
-        return try {
-            service.setRootlessMode(rootless)
-            true
-        } catch (e: RemoteException) {
-            handleServiceLost()
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "切换免 root 运行模式失败", e)
-            false
-        }
-    }
-
     // AIDL 接口实例
     @Volatile
     private var commandService: ICommandService? = null
@@ -312,6 +282,26 @@ object CommandUtil {
     /**
      * 绑定服务 (线程安全)
      */
+    /** 仅确认能否绑定到模块自身存储服务（免 root 注入下作为身份等价证据）。 */
+    suspend fun canBindModuleStore(context: Context): Boolean = try {
+        ensureServiceBound(context.applicationContext ?: context, identityOnly = true)
+    } catch (failure: Exception) {
+        android.util.Log.w(TAG, "模块存储服务绑定失败: ${failure.message}")
+        false
+    }
+
+    /** 告知模块进程当前为免 root 注入运行，执行条件不再要求 shell 执行器。 */
+    fun setRootlessMode(rootless: Boolean): Boolean {
+        val service = commandService ?: return false
+        return try {
+            service.setRootlessMode(rootless)
+            true
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "切换免 root 运行模式失败: ${e.message}")
+            false
+        }
+    }
+
     private suspend fun ensureServiceBound(context: Context, identityOnly: Boolean = false): Boolean {
         if (isBound.get() && commandService?.asBinder()?.isBinderAlive == true &&
             (identityOnly || !identityOnlyBinding)

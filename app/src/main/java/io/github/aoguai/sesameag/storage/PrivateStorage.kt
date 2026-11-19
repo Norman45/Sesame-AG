@@ -29,7 +29,7 @@ object PrivateStorage {
             update(State(ready = true, message = if (restoreCleaned) "配置已保存到应用私有目录" else "配置可用，旧恢复副本待下次启动清理",
                 cleanupPending = LegacyStorageMigration.hasCleanup(context)))
         } else {
-            // 免 root 场景不对旧数据做强制检查：直接初始化空白配置目录，旧数据迁移降级为可选操作。
+            // 免 root 场景不对旧数据做强制检查：直接初始化空白配置，旧数据迁移降级为可选。
             if (bootstrapEmpty()) {
                 update(State(ready = true, message = "已初始化空白配置（未迁移旧数据）"))
             } else {
@@ -38,14 +38,13 @@ object PrivateStorage {
         }
     }
 
-    /** 创建空白私有仓库并置为就绪；免 root 下替代“必须先授权 Root/Shizuku 才能检查旧数据”的流程。 */
+    /** 创建空白私有仓库并置为就绪；已有配置目录时只补标记，不覆盖账号数据。 */
     @Synchronized
     internal fun bootstrapEmpty(): Boolean {
         if (File(root, ".store-ready").isFile) {
             update(State(ready = true, message = "配置可用"))
             return true
         }
-        // 已有配置目录但缺少完成标记时只补标记，绝不覆盖已有账号数据。
         val hasExistingContent = root.isDirectory && (root.listFiles()?.isNotEmpty() == true)
         if (hasExistingContent) {
             return try {

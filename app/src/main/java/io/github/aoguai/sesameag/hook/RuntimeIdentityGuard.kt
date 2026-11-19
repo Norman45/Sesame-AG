@@ -73,10 +73,8 @@ object RuntimeIdentityGuard {
                     sourceDir.isBlank() -> reject("module_source_missing")
                     userId != PRIMARY_ANDROID_USER_ID -> reject("module_non_primary_user")
                     else -> {
-                        android.util.Log.w(
-                            "ApplicationHook",
-                            "module_identity_embedded_host: module=$packageName uid=${applicationInfo.uid} source=$sourceDir"
-                        )
+                        android.util.Log.w("ApplicationHook",
+                            "module_identity_embedded_host: package=$packageName uid=${applicationInfo.uid} source=$sourceDir")
                         state = state.copy(moduleSnapshot = ModuleSnapshot(applicationInfo.uid, sourceDir))
                         accept()
                     }
@@ -173,25 +171,18 @@ object RuntimeIdentityGuard {
         var confirmed = decision.accepted &&
             CommandUtil.verifyRuntimeIdentity(context, module.uid, module.sourceDir)
         if (decision.accepted && !confirmed) {
-            // 免 root 注入（LSPatch 等）没有 shell 执行器，AIDL 复核可能因上报信息不一致失败。
-            // 此时以“能否绑定到模块自身的存储服务”作为等价证据：能绑定即说明注入进程与目标应用 uid 一致。
+            // 免 root 注入没有 shell 执行器，AIDL 复核可能因上报信息不一致失败；
+            // 以“能否绑定模块存储服务”作为等价证据。
             val rootlessBindable = runCatching { CommandUtil.canBindModuleStore(context) }.getOrDefault(false)
             if (rootlessBindable) {
-                android.util.Log.w(
-                    "ApplicationHook",
-                    "identity_rootless_fallback: moduleUid=${module.uid} moduleSource=${module.sourceDir} " +
-                        "targetUid=${target.uid} targetProcess=${target.processName} " +
-                        "module_store_channel=bindable"
-                )
+                android.util.Log.w("ApplicationHook",
+                    "identity_rootless_fallback: moduleUid=${module.uid} targetUid=${target.uid} module_store_channel=bindable")
                 runCatching { CommandUtil.setRootlessMode(true) }
                     .onFailure { android.util.Log.w("ApplicationHook", "rootless_mode_switch_failed: ${it.message}") }
                 confirmed = true
             } else {
-                android.util.Log.w(
-                    "ApplicationHook",
-                    "identity_rootless_fallback_failed: moduleUid=${module.uid} moduleSource=${module.sourceDir} " +
-                        "module_store_channel=unbindable"
-                )
+                android.util.Log.w("ApplicationHook",
+                    "identity_rootless_fallback_failed: moduleUid=${module.uid} module_store_channel=unbindable")
             }
         }
         updates.execute {

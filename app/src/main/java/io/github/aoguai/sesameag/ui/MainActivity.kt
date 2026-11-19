@@ -162,10 +162,17 @@ class MainActivity : ComponentActivity() {
     private var latestTargetPermissionSnapshot: TargetPermissionSnapshot? = null
     private var pendingTargetPermissionSnapshotToken: Long = 0L
 
-    // 免 root（LSPatch 等）无需勾选目标作用域，相关检查已移除。
+    private val autoCriticalPermissions = listOf(
+        PermissionRequirement.LSPOSED_TARGET_SCOPE
+    )
 
     private val lspConnectionListener: (ConnectionState) -> Unit = { state ->
         runOnUiThread {
+            if (state !is ConnectionState.Connected &&
+                pendingPermissionRequest == PermissionRequirement.LSPOSED_TARGET_SCOPE
+            ) {
+                markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+            }
             refreshPermissionHealth()
             continuePermissionQueueOrAuto()
         }
@@ -563,7 +570,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.onForegroundStarted()
         refreshEnvironment()
-        if (pendingPermissionRequest == PermissionRequirement.SHELL_EXECUTOR) {
+        if (
+            pendingPermissionRequest == PermissionRequirement.LSPOSED_TARGET_SCOPE &&
+            LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
+        ) {
+            markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+        } else if (pendingPermissionRequest == PermissionRequirement.SHELL_EXECUTOR) {
             pendingPermissionRequest = null
         }
         CommandUtil.connect(applicationContext)
@@ -669,6 +681,8 @@ class MainActivity : ComponentActivity() {
         val order = activePermissionOrder
         if (mode != null && order.isNotEmpty()) {
             runPermissionQueue(order, mode)
+        } else {
+            runPermissionQueue(autoCriticalPermissions, PermissionRequestMode.AUTO_CRITICAL)
         }
     }
 
@@ -697,7 +711,9 @@ class MainActivity : ComponentActivity() {
             }
             deniedPermissionsThisVisibility.add(permission)
             markRequestFinished(permission)
-            ToastUtil.showToast(this, "暂时无法发起请求，请重试")
+            if (permission != PermissionRequirement.LSPOSED_TARGET_SCOPE) {
+                ToastUtil.showToast(this, "暂时无法发起请求，请重试")
+            }
         }
 
         if (
@@ -750,6 +766,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            PermissionRequirement.LSPOSED_TARGET_SCOPE -> requestLsposedTargetScope()
+
             PermissionRequirement.MODULE_EXACT_ALARM -> {
                 PermissionUtil.checkOrRequestExactAlarmPermissions(
                     this,
@@ -781,6 +799,27 @@ class MainActivity : ComponentActivity() {
             ModuleDiagnostics.event("permission", "request_failed", "requirement=$permission")
         }
         return requested
+    }
+
+    private fun requestLsposedTargetScope(): Boolean {
+        val sent = LsposedServiceManager.requestTargetScope { result ->
+            runOnUiThread {
+                markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+                ModuleDiagnostics.event("lsposed_scope", if (result.success) "granted" else "failed")
+                if (result.success) {
+                    ToastUtil.showToast(this, "已添加目标应用")
+                } else {
+                    deniedPermissionsThisVisibility.add(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+                    Log.runtime("MainActivity", "LSPosed scope request failed: ${result.message}")
+                    ToastUtil.showToast(this, "添加失败，请重试或在 LSPosed 中选择目标应用")
+                }
+                continuePermissionQueueOrAuto()
+            }
+        }
+        if (!sent) {
+            markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+        }
+        return sent
     }
 
     private fun requestShellExecutor(): Boolean {
@@ -906,6 +945,18 @@ class MainActivity : ComponentActivity() {
                 ) "打开设置" else "开启通知"
             ),
             PermissionHealthItem(
+                requirement = PermissionRequirement.LSPOSED_TARGET_SCOPE,
+                status = lsposedScopeStatus(targetInstalled, requesting),
+                policy = PermissionPolicy.AUTO_CRITICAL,
+                title = "目标应用作用域",
+                description = if (targetInstalled) {
+                    "在目标应用中启用模块"
+                } else {
+                    "安装目标应用，或在应用隐藏设置中将其设为可见"
+                },
+                actionLabel = if (targetInstalled) "添加目标应用" else null
+            ),
+            PermissionHealthItem(
                 requirement = PermissionRequirement.MODULE_EXACT_ALARM,
                 status = statusForGranted(
                     PermissionRequirement.MODULE_EXACT_ALARM,
@@ -983,6 +1034,24 @@ class MainActivity : ComponentActivity() {
             granted -> PermissionStatus.GRANTED
             requesting == requirement -> PermissionStatus.REQUESTING
             requirement in deniedPermissionsThisVisibility -> PermissionStatus.DENIED
+            else -> PermissionStatus.MISSING
+        }
+    }
+
+    private fun lsposedScopeStatus(
+        targetInstalled: Boolean,
+        requesting: PermissionRequirement?
+    ): PermissionStatus {
+        if (!targetInstalled) return PermissionStatus.UNAVAILABLE
+        val frameworkStatus = LsposedServiceManager.connectedFrameworkStatus() ?: return PermissionStatus.UNAVAILABLE
+        if (!frameworkStatus.isSupportedLsposed) return PermissionStatus.UNSUPPORTED
+        if (LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)) {
+            markPermissionGranted(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+            return PermissionStatus.GRANTED
+        }
+        return when {
+            requesting == PermissionRequirement.LSPOSED_TARGET_SCOPE -> PermissionStatus.REQUESTING
+            PermissionRequirement.LSPOSED_TARGET_SCOPE in deniedPermissionsThisVisibility -> PermissionStatus.DENIED
             else -> PermissionStatus.MISSING
         }
     }

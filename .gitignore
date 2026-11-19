@@ -112,9 +112,3 @@ webui_debug*
 /.aider/
 /.continue/
 /.lingma/
-
-# 签名材料，禁止入库
-keystore/
-*.keystore
-*.jks
-local.properties

@@ -43,13 +43,14 @@ internal class LibXposedRuntime(
         val frameworkName = runCatching { module.frameworkName }.getOrDefault("Unknown")
         val apiVersion = runCatching { module.apiVersion }.getOrDefault(0)
         if (!ModuleStatus.isSupportedLsposedFramework(frameworkName, apiVersion)) {
-            // 0.1.4 行为：不因框架名称/API 版本拦截，仅告警后继续加载（兼容 LSPatch 等免 root 注入）。
-            Log.w(TAG, "module=${General.MODULE_PACKAGE_NAME} Non-LSPosed runtime: $frameworkName API $apiVersion process=${param.processName}, continuing")
+            Log.e(TAG, "module=${General.MODULE_PACKAGE_NAME} Unsupported runtime: $frameworkName API $apiVersion process=${param.processName}")
             module.log(
-                Log.WARN,
+                Log.ERROR,
                 TAG,
-                "Non-LSPosed runtime: $frameworkName API $apiVersion; continuing (restored 0.1.4 behavior)"
+                "Unsupported runtime: $frameworkName API $apiVersion; requires LSPosed API ${ModuleStatus.MIN_SUPPORTED_LIBXPOSED_API}+"
             )
+            module.detach()
+            return
         }
 
         active = true

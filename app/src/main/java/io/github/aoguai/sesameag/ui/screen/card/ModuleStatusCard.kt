@@ -64,14 +64,13 @@ fun ModuleStatusCard(
         !isSavingLegalAcceptance
     val title = when (status) {
         MainViewModel.ModuleStatus.Loading -> "正在检查模块"
-        MainViewModel.ModuleStatus.NotActivated -> "模块已激活"
+        MainViewModel.ModuleStatus.NotActivated -> "模块未激活"
         is MainViewModel.ModuleStatus.Unsupported -> "请使用受支持的 LSPosed"
-        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块已激活"
+        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块未激活"
         is MainViewModel.ModuleStatus.Activated -> "模块已激活"
     }
-    // 免 root（LSPatch 等）不经过 LSPosed 管理器连接，未连接不再视为未激活。
-    val blocking = status is MainViewModel.ModuleStatus.Unsupported ||
-        status is MainViewModel.ModuleStatus.PrerequisitesMissing
+    val blocking = status is MainViewModel.ModuleStatus.NotActivated ||
+        status is MainViewModel.ModuleStatus.Unsupported || status is MainViewModel.ModuleStatus.PrerequisitesMissing
 
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -131,10 +130,10 @@ fun ModuleStatusCard(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                MainViewModel.ModuleStatus.NotActivated -> Text("免 root 注入模式，未接入 LSPosed 管理器", style = MaterialTheme.typography.bodyMedium)
+                MainViewModel.ModuleStatus.NotActivated -> Text("等待 LSPosed 连接", style = MaterialTheme.typography.bodyMedium)
                 MainViewModel.ModuleStatus.Loading -> Text("正在读取框架信息", style = MaterialTheme.typography.bodyMedium)
             }
-            if (status is MainViewModel.ModuleStatus.Unsupported) {
+            if (status is MainViewModel.ModuleStatus.NotActivated || status is MainViewModel.ModuleStatus.Unsupported) {
                 Button(
                     onClick = {
                         if (status is MainViewModel.ModuleStatus.Unsupported) {
@@ -193,7 +192,7 @@ fun ModuleStatusCard(
         },
         onConfirm = onRefresh,
         title = "启用模块",
-        text = "LSPosed → 模块 → 芝麻粒 → 启用",
+        text = "LSPosed → 模块 → 芝麻粒 → 启用<br>作用域 → 目标应用",
         confirmText = "重新检查",
         dismissText = "关闭",
     )

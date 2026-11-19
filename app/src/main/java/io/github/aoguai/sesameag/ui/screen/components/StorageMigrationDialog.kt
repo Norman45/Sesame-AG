@@ -37,7 +37,6 @@ fun StorageMigrationDialog(
                 }
                 if (!state.busy) {
                     if (state.needsInspection) {
-                        // 免 root 下跳过旧数据检查，直接使用空白配置；Root/Shizuku 授权改为可选。
                         TextButton(onClick = onSkip) { Text("跳过迁移，使用空白配置") }
                         TextButton(onClick = onAuthorize) { Text("授权 Root / Shizuku（可选）") }
                     } else {

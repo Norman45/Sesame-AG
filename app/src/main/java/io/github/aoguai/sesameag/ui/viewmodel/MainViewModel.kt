@@ -322,7 +322,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (!foregroundActive || !homeVisible || guidanceShown || permissionQueueBusy || homeDialogVisible) return
         if (LsposedServiceManager.connectedFrameworkStatus()?.isSupportedLsposed != true) return
-        if (_permissionHealth.value.item(PermissionRequirement.MODULE_FILE)?.isGranted != true) return
+        if (_permissionHealth.value.item(PermissionRequirement.MODULE_FILE)?.isGranted != true ||
+            _permissionHealth.value.item(PermissionRequirement.LSPOSED_TARGET_SCOPE)?.isGranted != true) return
         guidanceShown = true
         _accountGuide.value = "initial"
         ModuleDiagnostics.event("account_guide", "shown", "trigger=foreground")
