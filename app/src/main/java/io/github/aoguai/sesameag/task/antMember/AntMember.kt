@@ -1787,6 +1787,16 @@ class AntMember : ModelTask() {
         override val moduleName: String = memberTaskBlacklistModule
         override val flowName: String = "会员任务"
 
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+            super.estimateRoundLimit(items).coerceAtMost(MEMBER_TASK_ROUND_CAP)
+
+        /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+        override fun allowRoundExtension(
+            progressed: Boolean,
+            completedTasks: Int,
+            previousCompletedTasks: Int,
+        ): Boolean = progressed && completedTasks > previousCompletedTasks
+
         var hasIncompleteQuery: Boolean = false
             private set
         var queryFailed: Boolean = false
@@ -9199,6 +9209,9 @@ class AntMember : ModelTask() {
         private const val MERCHANT_UNCLOSED_AD_TASK_CODE = "SYH_RTB_SHOW_TASK_INDEX_1"
         private const val INSURED_GOLD_WAIT_LIST_QUERY_LIMIT = 3
         private const val MEMBER_TASK_REPEAT_LIMIT = 6
+
+        /** 会员任务流初始轮次上限：每轮多为“已受理待确认”，收紧以释放后续批次。 */
+        private const val MEMBER_TASK_ROUND_CAP = 4
         private const val MEMBER_CALL_APP_VERIFY_RETRY_LIMIT = 5
         private const val BEAN_DRAW_PLAN_ID = "INSP29990111"
 

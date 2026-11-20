@@ -39,6 +39,9 @@ internal const val MARKETING_POPUP_CLICKED = "MARKETING_POPUP_CLICKED"
 internal const val GOLDEN_BEAN_GAME_CHANNEL = "goldenbean"
 internal const val GOLDEN_BEAN_CONVERGENCE_LIMIT = 64
 
+/** 金豆夺宝任务流初始轮次上限：每轮多为“已受理待确认”，收紧以释放后续批次。 */
+internal const val GOLDEN_BEAN_TASK_ROUND_CAP = 4
+
 /**
  * Module-local orchestration for the Golden Bean Treasure domain. Task-list
  * transitions reuse TaskFlowEngine; mining and the game-centre draw use their
@@ -351,6 +354,16 @@ private class GoldenBeanTaskFlowAdapter(
     override val flowName: String = "金豆夺宝任务"
     override val stateScope: String = "$flowName:${entry.taskSceneCode}"
     override val continueCurrentRoundOnRetryableFailure: Boolean = true
+
+    override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+        super.estimateRoundLimit(items).coerceAtMost(GOLDEN_BEAN_TASK_ROUND_CAP)
+
+    /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+    override fun allowRoundExtension(
+        progressed: Boolean,
+        completedTasks: Int,
+        previousCompletedTasks: Int,
+    ): Boolean = progressed && completedTasks > previousCompletedTasks
 
     override fun query(): JSONObject {
         val syncTypes = nextQuerySyncTypes

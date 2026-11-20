@@ -1116,6 +1116,16 @@ class AntSesameCredit : ModelTask() {
         override val flowName: String = "芝麻信用任务"
         override val continueCurrentRoundOnRetryableFailure: Boolean = true
 
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+            super.estimateRoundLimit(items).coerceAtMost(SESAME_CREDIT_TASK_ROUND_CAP)
+
+        /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+        override fun allowRoundExtension(
+            progressed: Boolean,
+            completedTasks: Int,
+            previousCompletedTasks: Int,
+        ): Boolean = progressed && completedTasks > previousCompletedTasks
+
         override fun isSameTask(previous: TaskFlowItem, current: TaskFlowItem): Boolean {
             if (!super<TaskFlowAdapter>.isSameTask(previous, current)) return false
             val recordId = previous.raw?.optString("recordId").orEmpty()
@@ -5210,6 +5220,9 @@ class AntSesameCredit : ModelTask() {
     companion object {
         const val PERSISTENT_CONFIRMATION_KIND = "sesame_confirmation"
         private val TAG: String = AntSesameCredit::class.java.simpleName
+
+        /** 芝麻信用任务流初始轮次上限：每轮多为“已受理待确认”，收紧以释放后续批次。 */
+        private const val SESAME_CREDIT_TASK_ROUND_CAP = 4
         private val RENT_PUSH_MODEL_SNAPSHOT_SOURCES =
             setOf(
                 "daily.waitCompleteTaskVOS",

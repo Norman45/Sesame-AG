@@ -476,6 +476,16 @@ class AntDodo : ModelTask() {
         override val moduleName: String = TASK_BLACKLIST_MODULE
         override val flowName: String = "神奇物种任务"
 
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+            super.estimateRoundLimit(items).coerceAtMost(DODO_TASK_ROUND_CAP)
+
+        /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+        override fun allowRoundExtension(
+            progressed: Boolean,
+            completedTasks: Int,
+            previousCompletedTasks: Int,
+        ): Boolean = progressed && completedTasks > previousCompletedTasks
+
         override fun isFlowHandledToday(): Boolean = Status.hasFlagToday(StatusFlags.FLAG_ANTDODO_TASKS_DONE)
 
         override fun onAllTasksDone(snapshot: TaskFlowSnapshot) {
@@ -2106,6 +2116,9 @@ class AntDodo : ModelTask() {
     companion object {
         private val TAG = AntDodo::class.java.simpleName
         private const val TASK_BLACKLIST_MODULE = "神奇物种"
+
+        /** 神奇物种任务流初始轮次上限：每轮多为“已受理待确认”，收紧以释放后续批次。 */
+        private const val DODO_TASK_ROUND_CAP = 4
         const val PERSISTENT_CHILD_KIND = "dodo_child_task"
         const val COLLECT_TO_FRIEND_CHILD_ID = "collect_to_friend"
         const val TASK_FLOW_CHILD_ID = "task_flow"
