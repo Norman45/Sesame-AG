@@ -107,6 +107,15 @@ private const val SPECIAL_FOOD_USE_FARM_FOOD_RPC = "com.alipay.antfarm.useFarmFo
 class AntFarm : ModelTask() {
     internal var ownerFarmId: String? = null
     private val farmTaskBlacklistModule = "蚂蚁庄园"
+
+    /**
+     * 庄园任务流初始轮次上限。庄园任务与农场同源，大量动作返回“已受理待确认”，
+     * 每轮回查开销大且无实际推进；收紧上限以释放后续批次。
+     */
+    private val farmDailyRoundCap = 4
+
+    /** 多阶段任务需要按次推进，保留较多轮次，避免半途截断种植/递进任务。 */
+    private val farmMultiStageRoundCap = 10
     private val farmWorkflowQueue = SerialTaskQueue()
     private var farmTaskExecutionState = TaskFlowExecutionState()
     internal val farmWorkAttempted = mutableSetOf<String>()
@@ -4120,6 +4129,16 @@ modelFields.addField(
         override val moduleName: String = farmTaskBlacklistModule
         override val flowName: String = "庄园饲料任务"
 
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+            super.estimateRoundLimit(items).coerceAtMost(farmDailyRoundCap)
+
+        /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+        override fun allowRoundExtension(
+            progressed: Boolean,
+            completedTasks: Int,
+            previousCompletedTasks: Int,
+        ): Boolean = progressed && completedTasks > previousCompletedTasks
+
         override fun query(): JSONObject {
             val response = AntFarmRpcCall.listFarmTask()
             if (response.isEmpty()) {
@@ -4348,6 +4367,9 @@ modelFields.addField(
 
         override val moduleName: String = farmTaskBlacklistModule
         override val flowName: String = "庄园多阶段任务"
+
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
+            super.estimateRoundLimit(items).coerceAtMost(farmMultiStageRoundCap)
 
         override fun query(): JSONObject {
             val response = AntFarmRpcCall.listFarmTask()
