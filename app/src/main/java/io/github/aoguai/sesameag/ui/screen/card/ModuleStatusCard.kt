@@ -66,7 +66,7 @@ fun ModuleStatusCard(
         MainViewModel.ModuleStatus.Loading -> "正在检查模块"
         MainViewModel.ModuleStatus.NotActivated -> "模块已激活"
         is MainViewModel.ModuleStatus.Unsupported -> "请使用受支持的 LSPosed"
-        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块已激活"
+        is MainViewModel.ModuleStatus.PrerequisitesMissing -> "模块未激活"
         is MainViewModel.ModuleStatus.Activated -> "模块已激活"
     }
     // 免 root（LSPatch 等）不经过 LSPosed 管理器连接，未连接不再视为未激活。
