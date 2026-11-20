@@ -181,21 +181,13 @@ class CommandService : Service() {
             listeners.register(listener)
             val currentType = shellManager?.selectedName
             if (currentType.isNullOrBlank() || currentType == "no_executor") {
-                listener?.onStatusChanged("loading")
-                serviceScope.launch {
-                    try {
-                        ensureShellManager()
-                        shellManager?.onStateChanged = { newType ->
-                            dispatchStatusChange(newType)
-                        }
-                        val refreshedType = shellManager?.refreshSelection(notifyUnavailable = false)
-                        if (refreshedType == "no_executor") {
-                            listener?.onStatusChanged("no_executor")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "注册监听后刷新 Shell 状态失败", e)
-                    }
+                // 免 root 启动：注册监听时不主动探测 su/Shizuku，只回报当前状态，
+                // 需要 Root 的高级操作由用户显式触发时再探测。
+                ensureShellManager()
+                shellManager?.onStateChanged = { newType ->
+                    dispatchStatusChange(newType)
                 }
+                listener?.onStatusChanged(currentType ?: "no_executor")
             } else {
                 listener?.onStatusChanged(currentType)
             }
@@ -389,11 +381,12 @@ class CommandService : Service() {
         if (shellManager == null) {
             serviceScope.launch {
                 try {
+                    // 免 root 启动：只建立 ShellManager，不主动探测 su/Shizuku，
+                    // 避免首次打开模块应用时弹出 Root 授权框。真正执行命令时才按需探测。
                     ensureShellManager()
                     shellManager?.onStateChanged = { newType ->
                         dispatchStatusChange(newType)
                     }
-                    shellManager?.refreshSelection(notifyUnavailable = false)
                 } catch (e: Exception) {
                     Log.e(TAG, "ShellManager 初始化失败", e)
                 }
