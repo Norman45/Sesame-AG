@@ -29,8 +29,19 @@ object PrivateStorage {
             update(State(ready = true, message = if (restoreCleaned) "配置已保存到应用私有目录" else "配置可用，旧恢复副本待下次启动清理",
                 cleanupPending = LegacyStorageMigration.hasCleanup(context)))
         } else {
-            // 免 root：不再进入迁移门禁，直接视为就绪；目录由 StoreAccess 在首次写入时按需创建。
-            update(State(ready = true, message = "配置可用"))
+            // 免 root：不做迁移门禁，但要真实探测目录是否可读写，避免无条件下发“已就绪”。
+            val probe = runCatching {
+                if (!root.isDirectory && !root.mkdirs()) error("无法创建私有目录")
+                val file = File(root, ".ready-probe")
+                file.writeText("ok")
+                check(file.readText() == "ok") { "私有目录不可读" }
+                file.delete()
+                true
+            }
+            update(
+                if (probe.getOrElse { false }) State(ready = true, message = "配置可用")
+                else State(ready = false, message = "私有目录不可读写：${probe.exceptionOrNull()?.message ?: "未知原因"}")
+            )
         }
     }
 
