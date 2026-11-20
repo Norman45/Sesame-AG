@@ -64,6 +64,9 @@ class AntOrchard : ModelTask() {
         private const val YEB_SOURCE = "yaoqianshu_qiehuan"
         private const val XLIGHT_PAGE_FROM = "ch_url-https://render.alipay.com/p/yuyan/180020010001263018/game.html"
         private const val ORCHARD_TASK_BLACKLIST_MODULE = "芭芭农场"
+
+        /** 农场首页任务流初始轮次上限：每轮约 60 秒，压低以释放批次链。 */
+        private const val MAX_DAILY_ROUNDS = 4
         private const val LEYUAN_DAILY_TASK_SCENE_CODE = "ANTORCHARD_LEYUAN_DAILY_TASK"
         private const val TASK_JINDOU_TREASURE = "ORCHARD_NORMAL_JINDOUDUOBAO"
         private const val TASK_FORTUNE_TREE = "ORCHARD_NORMAL_FACAISHU_NEW"
@@ -948,6 +951,23 @@ class AntOrchard : ModelTask() {
         override val moduleName: String = ORCHARD_TASK_BLACKLIST_MODULE
         override val flowName: String = if (starTasks) "农场努力流星任务" else "农场任务"
         override val continueCurrentRoundOnRetryableFailure: Boolean = true
+
+        /**
+         * 农场首页任务量固定，绝大多数动作会被服务端判为“已受理待确认”（400000040 不支持 rpc 调用），
+         * 每轮回查约 60 秒且几乎不会转成已完成。把初始轮次上限压到 MAX_DAILY_ROUNDS，
+         * 避免单批次占用数十分钟导致后续批次（庄园、会员、物种、信用、金豆）无法派发。
+         */
+        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int {
+            val estimated = super.estimateRoundLimit(items)
+            return if (starTasks) estimated else estimated.coerceAtMost(MAX_DAILY_ROUNDS)
+        }
+
+        /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
+        override fun allowRoundExtension(
+            progressed: Boolean,
+            completedTasks: Int,
+            previousCompletedTasks: Int,
+        ): Boolean = progressed && completedTasks > previousCompletedTasks
 
         override fun isFlowHandledToday(): Boolean =
             !starTasks && Status.hasFlagToday(StatusFlags.FLAG_ANTORCHARD_TASKS_DONE)

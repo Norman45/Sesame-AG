@@ -353,6 +353,17 @@ interface TaskFlowAdapter {
         return max(1, pendingTransitions + visibleTaskCount)
     }
 
+    /**
+     * 本轮结束时是否允许因进展而延长轮次上限。
+     * 默认沿用原有语义（本轮有任何进展即延长）；仅回查待确认且完成数未增长的流程应返回 false，
+     * 否则会把整条批次串行链路长时间占住。
+     */
+    fun allowRoundExtension(
+        progressed: Boolean,
+        completedTasks: Int,
+        previousCompletedTasks: Int,
+    ): Boolean = progressed
+
     fun actionKey(
         item: TaskFlowItem,
         action: TaskFlowAction,
@@ -493,6 +504,7 @@ class TaskFlowEngine(
         var failureCountAny = unresolvedFailureCount
         var tailFollowUpRefreshBudget = 1
         var confirmationRefreshOnlyRound = false
+        var lastCompletedTasks = -1
         val loggedBlacklistMatches = mutableSetOf<String>()
         var failureStoppedActions = false
 
@@ -960,13 +972,19 @@ class TaskFlowEngine(
                 )
             }
 
-            val extendedRoundLimit = extendRoundLimitIfNeeded(round, roundLimit, hardRoundLimit, progressed)
+            val extendedRoundLimit = extendRoundLimitIfNeeded(
+                round,
+                roundLimit,
+                hardRoundLimit,
+                adapter.allowRoundExtension(progressed, snapshot.completedTasks, lastCompletedTasks),
+            )
             if (extendedRoundLimit != roundLimit) {
                 adapter.logInfo(
                     "${adapter.flowName}[动态任务仍有进展，轮次上限延长:$roundLimit->$extendedRoundLimit/$hardRoundLimit]",
                 )
                 roundLimit = extendedRoundLimit
             }
+            lastCompletedTasks = snapshot.completedTasks
 
             round++
         }
