@@ -27,14 +27,14 @@ object ModuleStatus {
     }
 
     /** 免 root 注入框架（LSPatch 一类）：不带 Xposed 管理器，走集成/本地补丁注入。 */
-    private fun isRootlessInjectionFramework(officialName: String): Boolean {
-        val lower = officialName.lowercase()
-        return lower.contains("lspatch")
+    fun isRootlessFramework(officialName: String?): Boolean {
+        val name = officialName?.trim() ?: return false
+        return name.lowercase().contains("lspatch")
     }
 
     fun classifyFrameworkName(frameworkName: String?): FrameworkCategory {
         val officialName = frameworkName?.trim() ?: return FrameworkCategory.UNSUPPORTED
-        return if (officialName == "LSPosed" || officialName == "Vector" || isRootlessInjectionFramework(officialName)) {
+        return if (officialName == "LSPosed" || officialName == "Vector" || isRootlessFramework(officialName)) {
             FrameworkCategory.LSPOSED
         } else {
             FrameworkCategory.UNSUPPORTED

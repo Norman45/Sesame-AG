@@ -105,8 +105,15 @@ object CommandUtil {
         }
     }
 
+    @Volatile
+    private var rootlessMode = false
+
+    /** 当前是否处于免 root（LSPatch 一类）注入运行模式。 */
+    fun isRootlessMode(): Boolean = rootlessMode
+
     /** 告知模块进程当前为免 root 注入运行，执行条件不再要求 shell 执行器。 */
     fun setRootlessMode(rootless: Boolean): Boolean {
+        rootlessMode = rootless
         val service = commandService ?: return false
         return try {
             service.setRootlessMode(rootless)
@@ -213,6 +220,10 @@ object CommandUtil {
                 // 抓包会话与执行器监听独立，身份/存储连接也需要恢复主进程提供者。
                 if (RuntimeIdentityGuard.isTrustedForExecution()) {
                     commandService?.setCaptureSessionProvider(captureSessionProvider)
+                }
+
+                if (rootlessMode) {
+                    runCatching { commandService?.setRootlessMode(true) }
                 }
 
                 if (io.github.aoguai.sesameag.storage.StoreAccess.isRemote) {
