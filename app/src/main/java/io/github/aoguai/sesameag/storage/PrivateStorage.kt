@@ -29,7 +29,8 @@ object PrivateStorage {
             update(State(ready = true, message = if (restoreCleaned) "配置已保存到应用私有目录" else "配置可用，旧恢复副本待下次启动清理",
                 cleanupPending = LegacyStorageMigration.hasCleanup(context)))
         } else {
-            update(State(message = "需要检查是否有原有配置", needsInspection = true))
+            // 免 root：不再进入迁移门禁，直接视为就绪；目录由 StoreAccess 在首次写入时按需创建。
+            update(State(ready = true, message = "配置可用"))
         }
     }
 
