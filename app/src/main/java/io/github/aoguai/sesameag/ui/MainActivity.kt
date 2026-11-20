@@ -960,9 +960,10 @@ class MainActivity : ComponentActivity() {
             PermissionHealthItem(
                 requirement = PermissionRequirement.SHELL_EXECUTOR,
                 status = shellExecutorStatus(requesting),
-                policy = PermissionPolicy.MANUAL_CRITICAL,
+                // 免 root：Root/Shizuku 只服务可选的高级操作，不计入必需权限与协议激活判定
+                policy = PermissionPolicy.MANUAL_CARD,
                 title = "Root/Shizuku",
-                description = "Root 与 Shizuku 任一可用即可",
+                description = "可选：迁移旧数据、停止目标应用等高级操作使用",
                 actionLabel = if (isShizukuPermissionMissing()) "授权 Shizuku" else "连接",
                 requestWhenUnavailable = true
             )
