@@ -40,7 +40,7 @@ object PrivateStorage {
             }
             update(
                 if (probe.getOrElse { false }) State(ready = true, message = "配置可用")
-                else State(ready = false, message = "私有目录不可读写：${probe.exceptionOrNull()?.message ?: "未知原因"}")
+                else State(ready = false, message = "私有目录不可读写")
             )
         }
     }
