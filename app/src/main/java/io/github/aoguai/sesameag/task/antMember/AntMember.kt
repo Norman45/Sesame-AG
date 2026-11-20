@@ -1787,9 +1787,6 @@ class AntMember : ModelTask() {
         override val moduleName: String = memberTaskBlacklistModule
         override val flowName: String = "会员任务"
 
-        override fun estimateRoundLimit(items: List<TaskFlowItem>): Int =
-            super.estimateRoundLimit(items).coerceAtMost(MEMBER_TASK_ROUND_CAP)
-
         /** 只有任务完成数真正增长才延长轮次；单纯领奖或回查待确认不再无限续轮。 */
         override fun allowRoundExtension(
             progressed: Boolean,
@@ -2052,6 +2049,7 @@ class AntMember : ModelTask() {
                 }
             }
             return max(1, visibleTaskCount * MEMBER_TASK_REPEAT_LIMIT * 2 + visibleTaskCount)
+                .coerceAtMost(MEMBER_TASK_ROUND_CAP)
         }
 
         override fun afterSuccess(item: TaskFlowItem, action: TaskFlowAction, result: TaskFlowActionResult) {
