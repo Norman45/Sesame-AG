@@ -76,6 +76,10 @@ class CommandService : Service() {
     @Volatile
     private var captureSessionProvider: ICaptureSession? = null
 
+    /** 免 root 注入（LSPatch 等）下没有 shell 执行器，允许执行条件跳过执行器判定。 */
+    @Volatile
+    private var rootlessMode = false
+
     private val binder = object : ICommandService.Stub() {
         override fun beginStoreTransaction(client: IBinder): io.github.aoguai.sesameag.IStoreTransaction {
             val uid = enforceTrustedCaller()
@@ -177,21 +181,13 @@ class CommandService : Service() {
             listeners.register(listener)
             val currentType = shellManager?.selectedName
             if (currentType.isNullOrBlank() || currentType == "no_executor") {
-                listener?.onStatusChanged("loading")
-                serviceScope.launch {
-                    try {
-                        ensureShellManager()
-                        shellManager?.onStateChanged = { newType ->
-                            dispatchStatusChange(newType)
-                        }
-                        val refreshedType = shellManager?.refreshSelection(notifyUnavailable = false)
-                        if (refreshedType == "no_executor") {
-                            listener?.onStatusChanged("no_executor")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "注册监听后刷新 Shell 状态失败", e)
-                    }
+                // 免 root 启动：注册监听时不主动探测 su/Shizuku，只回报当前状态，
+                // 需要 Root 的高级操作由用户显式触发时再探测。
+                ensureShellManager()
+                shellManager?.onStateChanged = { newType ->
+                    dispatchStatusChange(newType)
                 }
+                listener?.onStatusChanged(currentType ?: "no_executor")
             } else {
                 listener?.onStatusChanged(currentType)
             }
@@ -218,7 +214,6 @@ class CommandService : Service() {
 
         override fun verifyRuntimeIdentity(expectedModuleUid: Int, expectedModuleSourceDir: String?): Boolean {
             val callerUid = enforceTrustedCaller()
-            if (expectedModuleUid !in 0 until 100_000 || expectedModuleSourceDir.isNullOrBlank()) return false
             val identity = Binder.clearCallingIdentity()
             return try {
                 @Suppress("DEPRECATION")
@@ -228,6 +223,7 @@ class CommandService : Service() {
                 val moduleApk = moduleInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
                 val targetApk = targetInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
                 val contextApk = applicationInfo.sourceDir?.takeIf { it.isNotBlank() }?.let { File(it).canonicalFile }
+                // 基准改为本机 PackageManager 实测的模块信息，不再信任注入端上报的 uid/sourceDir。
                 val accepted = packageName == General.MODULE_PACKAGE_NAME &&
                     applicationInfo.packageName == General.MODULE_PACKAGE_NAME &&
                     applicationInfo.uid == Process.myUid() &&
@@ -236,12 +232,15 @@ class CommandService : Service() {
                     moduleInfo.uid != targetInfo.uid &&
                     moduleInfo.packageName == General.MODULE_PACKAGE_NAME &&
                     moduleInfo.uid == Process.myUid() &&
-                    moduleInfo.uid == expectedModuleUid &&
-                    moduleInfo.sourceDir == expectedModuleSourceDir &&
                     targetInfo.packageName == General.PACKAGE_NAME &&
                     targetInfo.uid in 0 until 100_000 &&
                     callerUid == targetInfo.uid &&
                     !targetInfo.sourceDir.isNullOrBlank()
+                if (accepted && (expectedModuleUid != moduleInfo.uid || expectedModuleSourceDir != moduleInfo.sourceDir)) {
+                    // 免 root 注入（LSPatch 等）上报的模块信息与安装包不一致只记录，不影响判定。
+                    Log.w(TAG, "runtime_identity_soft_mismatch: injectedUid=$expectedModuleUid injectedSource=$expectedModuleSourceDir " +
+                        "installedUid=${moduleInfo.uid} installedSource=${moduleInfo.sourceDir}")
+                }
                 if (!accepted) {
                     Log.w(TAG, "runtime_identity_rejected: callerUid=$callerUid targetUid=${targetInfo.uid} " +
                         "moduleUid=${moduleInfo.uid} expectedModuleUid=$expectedModuleUid " +
@@ -269,8 +268,7 @@ class CommandService : Service() {
             return try {
                 if (!provider.asBinder().isBinderAlive ||
                     shellManager?.selectedName.let { it == null || it == "no_executor" } ||
-                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady ||
-                    !LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
+                    !io.github.aoguai.sesameag.storage.PrivateStorage.isReady
                 ) return null
                 val session = provider.currentSession ?: return null
                 val userId = session.getString("userId")?.takeIf { it.isNotBlank() } ?: return null
@@ -288,17 +286,22 @@ class CommandService : Service() {
             }
         }
 
+        override fun setRootlessMode(rootless: Boolean) {
+            enforceTrustedCaller()
+            rootlessMode = rootless
+            Log.w(TAG, "runtime_mode_changed: rootless=$rootless")
+        }
+
         override fun isExecutionAllowed(userId: String?): Boolean {
             enforceTrustedCaller()
             val activeUserId = userId?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-            val manager = shellManager ?: return false
-            if (manager.selectedName == "no_executor") return false
+            val manager = shellManager
+            // 免 root 注入没有执行器，只要存储与协议就绪即允许执行。
+            if (!rootlessMode && (manager == null || manager.selectedName == "no_executor")) return false
             val identity = Binder.clearCallingIdentity()
             return try {
                 runCatching {
-                    LsposedServiceManager.refreshScope()
                     io.github.aoguai.sesameag.storage.PrivateStorage.isReady &&
-                        LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME) &&
                         Config.readLegalAcceptedForCurrentVersion(activeUserId)
                 }.getOrDefault(false)
             } finally {
@@ -378,11 +381,12 @@ class CommandService : Service() {
         if (shellManager == null) {
             serviceScope.launch {
                 try {
+                    // 免 root 启动：只建立 ShellManager，不主动探测 su/Shizuku，
+                    // 避免首次打开模块应用时弹出 Root 授权框。真正执行命令时才按需探测。
                     ensureShellManager()
                     shellManager?.onStateChanged = { newType ->
                         dispatchStatusChange(newType)
                     }
-                    shellManager?.refreshSelection(notifyUnavailable = false)
                 } catch (e: Exception) {
                     Log.e(TAG, "ShellManager 初始化失败", e)
                 }

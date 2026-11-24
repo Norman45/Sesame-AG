@@ -92,9 +92,7 @@ object WorkflowRootGuard {
             }
             if (frameworkInfo != null) {
                 Log.record(TAG, "🧩 当前进程框架识别: ${frameworkInfo.displayName}")
-                if (ApplicationHook.hasSupportedLibXposedRuntime() &&
-                    frameworkInfo.category == ModuleStatus.FrameworkCategory.LSPOSED
-                ) {
+                if (isAllowedHookFramework(frameworkInfo.category)) {
                     Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
                     return true
                 }
@@ -115,16 +113,21 @@ object WorkflowRootGuard {
     }
 
     private fun resolveHookAccessSource(): String? {
+        // 0.1.4 行为：进程已被 Hook 即视为存在注入来源，不再按框架白名单收紧。
+        if (ApplicationHook.isHooked) {
+            return try {
+                ApplicationHook.resolveCurrentFrameworkInfo().displayName
+            } catch (_: Throwable) {
+                "Hook"
+            }
+        }
         ApplicationHook.classLoader ?: return null
         val frameworkInfo = try {
             ApplicationHook.resolveCurrentFrameworkInfo()
         } catch (_: Throwable) {
             return null
         }
-        return frameworkInfo.displayName.takeIf {
-            ApplicationHook.hasSupportedLibXposedRuntime() &&
-                isAllowedHookFramework(frameworkInfo.category)
-        }
+        return frameworkInfo.displayName.takeIf { isAllowedHookFramework(frameworkInfo.category) }
     }
 
     private fun isAllowedHookFramework(category: ModuleStatus.FrameworkCategory): Boolean {

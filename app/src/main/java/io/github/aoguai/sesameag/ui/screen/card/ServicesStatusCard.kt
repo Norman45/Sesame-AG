@@ -161,8 +161,8 @@ private fun PermissionHealthRow(
         item.requirement == PermissionRequirement.SHELL_EXECUTOR -> {
             if (item.isGranted && serviceStatus is ServiceStatus.Active) "${serviceStatus.type} 已连接" else "未连接"
         }
-        item.requirement == PermissionRequirement.MODULE_FILE -> if (item.isGranted) "已就绪" else "待迁移"
-        item.isGranted -> if (item.requirement == PermissionRequirement.LSPOSED_TARGET_SCOPE) "已添加" else "已授权"
+        item.requirement == PermissionRequirement.MODULE_FILE -> if (item.isGranted) "已就绪" else "未就绪"
+        item.isGranted -> "已授权"
         item.status == PermissionStatus.UNAVAILABLE -> "待确认"
         item.status == PermissionStatus.UNSUPPORTED -> "当前不可用"
         item.isRequired -> "待授权"

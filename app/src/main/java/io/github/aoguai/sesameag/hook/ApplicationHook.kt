@@ -145,11 +145,13 @@ class ApplicationHook {
         val frameworkInfo = resolveCurrentFrameworkInfo()
         val framework = frameworkInfo.displayName
         val frameworkApiVersion = getFrameworkRuntimeInfo()?.apiVersion ?: 0
+        if (ModuleStatus.isRootlessFramework(frameworkRuntimeInfo?.name ?: framework)) {
+            CommandUtil.setRootlessMode(true)
+        }
         if (!ModuleStatus.isSupportedLsposedFramework(framework, frameworkApiVersion)) {
-            remotePreferences = null
+            // 0.1.4 行为：不做框架拦截，照常安装 Hook（兼容 LSPatch 等免 root 注入）。
             ModuleStatusReporter.updateNow(framework = framework, packageName = packageName, reason = "unsupported_libxposed_runtime")
-            record(TAG, "⛔ 检测到不受支持的 $framework 运行时 (API $frameworkApiVersion)，停止安装 Hook")
-            return
+            record(TAG, "⚠️ 检测到 $framework 运行时 (API $frameworkApiVersion)，按 0.1.4 逻辑继续安装 Hook")
         }
 
         // 1. 初始化配置读取
@@ -1591,8 +1593,9 @@ class ApplicationHook {
                         record(TAG, "⏳ 执行权限服务尚未就绪，保留待初始化状态: $reason")
                         return@execute
                     }
+                    val rootless = CommandUtil.isRootlessMode()
                     val granted = WorkflowRootGuard.hasRoot(forceRefresh = true, reason = reason) &&
-                        executorStatus is CommandUtil.ServiceStatus.Active &&
+                        (rootless || executorStatus is CommandUtil.ServiceStatus.Active) &&
                         WorkflowRootGuard.isExecutionAllowed()
                     if (!granted) {
                         Log.w(TAG, "execution_prerequisites_missing: trigger=$reason executor=${executorStatus.javaClass.simpleName} " +
