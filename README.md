@@ -20,9 +20,9 @@
 > [!IMPORTANT]
 > 为避免滥用，确保模块以学习研究为主的定位，当前仓库仅对以下环境组合提供“支持维护”：
 >
-> - `LSPosed（libxposed API 102+；模块框架 min/target API 均为 102）`
-> - `已 Root`
-> - `Android 16+`
+> - `LSPosed及LSPatch（libxposed API 102+；模块框架 min/target API 均为 102）`
+> - `免Root及Root`
+> - `Android 10+`
 > - `目标应用版本 >=v10.3.96.8100`
 >
 > 上述范围之外的框架版本、系统版本、运行条件或仅能在非上述环境中复现的问题，可能仍会被讨论，但不属于项目维护团队承诺持续适配、优先处理或长期回归验证的范围。
