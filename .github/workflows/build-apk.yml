@@ -62,6 +62,30 @@ jobs:
       - name: Build Release APKs
         run: ./gradlew --no-daemon --stacktrace assembleRelease
 
+      # 上游 build.gradle.kts 的 release 直接复用 debug 签名，不读取上面的 KEYSTORE_* 环境变量，
+      # 所以这里用 apksigner 以 release.jks 重新签名，保证证书与既有安装包一致、可覆盖安装。
+      - name: Re-sign APKs with release keystore
+        if: env.KEYSTORE_FILE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BT="$SDK/build-tools/${ANDROID_BUILD_TOOLS}"
+          ls "$BT/apksigner" >/dev/null
+          for apk in app/build/outputs/apk/release/*.apk; do
+            out="$RUNNER_TEMP/$(basename "$apk")"
+            "$BT/zipalign" -p -f 4 "$apk" "$out"
+            "$BT/apksigner" sign \
+              --ks "$KEYSTORE_FILE" \
+              --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --key-pass "pass:$KEY_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              "$out"
+            "$BT/apksigner" verify --print-certs "$out" | grep -i "SHA-256" || true
+            cp "$out" "$apk"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: Sesame-AG-apk
